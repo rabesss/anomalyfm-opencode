@@ -34,7 +34,7 @@
  *   "unhandledRejection")` probe counts stray rejections across the mount.
  */
 
-import { test, expect, afterEach } from "bun:test";
+import { test, expect, beforeEach, afterEach } from "bun:test";
 import plugin from "../src/index.tsx";
 import { fakeTuiApi } from "./fake-tui-api.ts";
 
@@ -58,7 +58,33 @@ function flushMicrotasks(): Promise<void> {
 let savedWhich: typeof Bun.which | null = null;
 let savedFetch: typeof globalThis.fetch | null = null;
 
+/**
+ * The fake api returned by the most recent `mount()`, tracked so `afterEach`
+ * can dispose it (clearing the poller's 15s cadence interval + the controller's
+ * retry/watchdog timers) even if a test forgets to. Every mount has a matching
+ * dispose, no matter which test runs.
+ */
+let currentApi: ReturnType<typeof fakeTuiApi> | null = null;
+
+beforeEach(() => {
+  // Finding 1 fix: stub fetch for EVERY test, not just test 4. Without this,
+  // `mount()` → `tui()` → `poller.start()` → `pollOnce()` awaits the real
+  // `globalThis.fetch` against https://anomaly.fm/feed/status.json, leaking a
+  // real network GET (the error is swallowed by pollOnce's try/catch, so no
+  // crash — but the run is non-deterministic and spammy in networkless CI).
+  stubFetchToFail();
+});
+
 afterEach(() => {
+  // Finding 2 fix: dispose whatever the test mounted. `start()`'s
+  // `.finally(armInterval)` arms a 15s cadence interval once the (now stubbed)
+  // fetch settles inside `flushMicrotasks`; without `poller.stop()` that
+  // interval leaks across tests. `_runDispose()` runs the plugin's onDispose
+  // chain (keymap disposer + controller.dispose + poller.stop) and is
+  // idempotent, so a test that already disposed (test 4) is harmless.
+  currentApi?._runDispose();
+  currentApi = null;
+
   if (savedWhich !== null) {
     (Bun as unknown as { which: typeof Bun.which }).which = savedWhich;
     savedWhich = null;
@@ -100,6 +126,7 @@ function stubFetchToFail(): void {
  */
 async function mount() {
   const api = fakeTuiApi();
+  currentApi = api; // tracked so afterEach can dispose it (Finding 2)
   const tui = plugin.tui as (
     api: unknown,
     options: unknown,
@@ -140,7 +167,7 @@ test("slot render is installed as a function (registration, not string)", async 
 
 test("radio.toggle run drives the controller (no real mpv) and dispose is clean", async () => {
   stubBunWhichMissing(); // player → UNSUPPORTED at construction; toggle is a no-op
-  stubFetchToFail(); // poller's first GET fails gracefully
+  // fetch is stubbed by beforeEach (Finding 1) — no per-test call needed here.
 
   // Count stray rejections across the whole mount → toggle → dispose cycle.
   let unhandled = 0;

@@ -1,0 +1,11 @@
+{
+  "station": "anomaly.fm",
+  "live": false,
+  "humans": 0,
+  "members": [],
+  "memberIds": [],
+  "rerun": null,
+  "listeners": null,
+  "sources": { "web": null, "youtube": null },
+  "updated": "2026-07-05T13:00:00.000Z"
+}

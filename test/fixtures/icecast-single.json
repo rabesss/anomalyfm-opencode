@@ -1,0 +1,12 @@
+{
+  "icestats": {
+    "admin": "admin@anomaly.fm",
+    "source": {
+      "genre": "talk",
+      "listeners": 10,
+      "listenurl": "http://anomaly.fm:8000/radio",
+      "server_name": "anomaly.fm",
+      "server_type": "audio/mpeg"
+    }
+  }
+}

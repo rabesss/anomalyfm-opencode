@@ -1,0 +1,26 @@
+{
+  "name": "anomalyfm-opencode",
+  "version": "0.1.0",
+  "description": "anomaly.fm radio plugin for the opencode TUI — statusline + mpv audio.",
+  "type": "module",
+  "module": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "verify-pause": "bash scripts/verify-pause.sh"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "1.17.13",
+    "@opencode-ai/sdk": "1.17.13",
+    "@opentui/core": "0.4.3",
+    "@opentui/keymap": "0.4.3",
+    "@opentui/solid": "0.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "engines": { "bun": ">=1.3.0" }
+}

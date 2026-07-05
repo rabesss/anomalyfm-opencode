@@ -1,0 +1,5 @@
+.superpowers/
+.codegraph/
+ground-truth/
+node_modules/
+*.log

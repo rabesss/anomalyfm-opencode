@@ -7,3 +7,4 @@ backends/
 bun.lock
 
 scripts/live-smoke.ts
+results-verify-pause.csv

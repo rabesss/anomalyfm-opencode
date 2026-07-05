@@ -9,7 +9,7 @@
     "./types": "./src/types.ts"
   },
   "scripts": {
-    "test": "bun test",
+    "test": "bun test ./test",
     "verify-pause": "bash scripts/verify-pause.sh"
   },
   "peerDependencies": {

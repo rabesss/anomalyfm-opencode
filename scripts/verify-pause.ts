@@ -152,8 +152,6 @@ function isDescendantOf(pid: number, root: number): boolean {
     seen.add(cur);
     let ppid = 0;
     try {
-      const stat = Bun.file(`/proc/${cur}/stat`);
-      // Bun.file is async; do it sync via spawnSync cat for simplicity.
       const r = spawnSync("cat", [`/proc/${cur}/stat`], { encoding: "utf8" });
       const txt = r.stdout ?? "";
       const lp = txt.lastIndexOf(")");
@@ -212,17 +210,25 @@ function readProc(
 }
 
 /**
- * Sum bytes_received across sockets whose peer is ANOMALY_IP. Ported from
- * measure.ts: `ss -tnp` → ports of mpv→anomaly.fm, then `ss -tni` → sum.
+ * Sum bytes_received across sockets owned by the mpv child (pid) whose peer is
+ * ANOMALY_IP. Ported verbatim from measure.ts: `ss -tnp` → ports of
+ * mpv→anomaly.fm (filtered by `pid=${pid},`), then `ss -tni` → sum.
  *
- * For the plugin we widen the match to any socket touching ANOMALY_IP on this
- * host (the opencode process itself polls status JSON at
- * https://anomaly.fm/radio — but that is a *different* host than the IP we
- * care about; the IP filter ensures only the streaming-socket bytes count).
+ * The pid filter is essential here: the opencode host process ALSO polls
+ * status JSON over HTTPS at https://anomaly.fm/radio/status.json, and that
+ * domain resolves to the SAME IP (161.210.92.14) as the streaming socket —
+ * `dig anomaly.fm` returns 161.210.92.14 directly. An IP-only filter would
+ * therefore count the host's own status-poll bytes, which the prototype
+ * deliberately excluded. Scoping to the mpv child's pid measures ONLY the
+ * streaming socket.
+ *
+ * Returns total bytes_received across all mpv-child→anomaly.fm sockets, or -1
+ * if none (e.g. when mpv is dead in window C — the correct "no streaming
+ * socket" verdict).
  */
-function readSocketBytesToAnomaly(): number {
-  // 1. local ports connecting to ANOMALY_IP (any pid — we care about the
-  //    streaming socket regardless of owner).
+function readSocketBytesToAnomaly(pid: number | null): number {
+  if (!pid) return -1;
+  // 1. local ports OWNED BY THIS mpv pid that connect to ANOMALY_IP.
   let out = "";
   try {
     const r = spawnSync("ss", ["-tnp"], { encoding: "utf8" });
@@ -232,6 +238,7 @@ function readSocketBytesToAnomaly(): number {
   }
   const ports = new Set<string>();
   for (const line of out.split("\n")) {
+    if (!line.includes(`pid=${pid},`)) continue;
     if (!line.includes(ANOMALY_IP)) continue;
     const m = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)/);
     if (m) ports.add(m[2]);
@@ -301,7 +308,10 @@ function sample(
     const sticks = mpvProc.utime + mpvProc.stime;
     if (lastMpvCpu) {
       const dt = (now - lastMpvCpu.t) / 1000;
-      const d = sticks - lastMpvCpu.sticks;
+      // Clamp the delta ≥ 0: a freshly-spawned mpv (after death/rebirth) can
+      // have LOWER cumulative ticks than the previous sample's mpv, which
+      // would otherwise yield a spurious negative CPU%. Mirrors the sock clamp.
+      const d = Math.max(0, sticks - lastMpvCpu.sticks);
       if (dt > 0) mpv_cpu_pct = (d / CLK_TCK / dt) * 100;
     }
     lastMpvCpu = mpvProc.alive ? { sticks, t: now } : null;
@@ -309,7 +319,9 @@ function sample(
     lastMpvCpu = null;
   }
 
-  const sockBytes = readSocketBytesToAnomaly();
+  // Pass the mpv child's pid so the socket filter measures ONLY the mpv-child
+  // streaming socket (not the host's status-JSON poll, which goes to the same IP).
+  const sockBytes = readSocketBytesToAnomaly(mpvPid);
   let sock_bps = 0;
   if (sockBytes >= 0 && lastSock && lastSock.bytes >= 0) {
     const dt = (now - lastSock.t) / 1000;

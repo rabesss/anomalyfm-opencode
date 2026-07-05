@@ -95,6 +95,12 @@ export interface MpvStreamPlayerOptions {
   playTimeoutMs?: number;
   /** Logger; defaults to no-op. */
   log?: (...args: unknown[]) => void;
+  /**
+   * Injectable spawn for testing. Defaults to `Bun.spawn`. Tests pass a mock
+   * that returns a fake child process so the spawn/kill contract can be locked
+   * down without mpv installed and without real audio.
+   */
+  spawn?: typeof Bun.spawn;
 }
 
 // Regexes for the two stdout signals we care about. mpv lines look like:
@@ -119,6 +125,8 @@ export class MpvStreamPlayer implements StreamPlayer {
   private readonly url: string;
   private readonly log: (...a: unknown[]) => void;
   private readonly playTimeoutMs: number;
+  /** Injectable spawn (defaults to Bun.spawn) — exercised by contract tests. */
+  private readonly spawn: typeof Bun.spawn;
 
   private proc: ReturnType<typeof Bun.spawn> | null = null;
   private stdoutParser: ((line: string) => void) | null = null;
@@ -129,6 +137,7 @@ export class MpvStreamPlayer implements StreamPlayer {
     this.url = opts.url ?? ANOMALY_STREAM_URL;
     this.log = opts.log ?? (() => {});
     this.playTimeoutMs = opts.playTimeoutMs ?? 20_000;
+    this.spawn = opts.spawn ?? Bun.spawn;
 
     // Detect missing binary eagerly and once, at construction.
     if (!Bun.which(MPV_BIN)) {
@@ -158,8 +167,12 @@ export class MpvStreamPlayer implements StreamPlayer {
   }
 
   async play(): Promise<void> {
+    // StreamPlayer contract: surface unavailability via state, not by throwing.
+    // If mpv was already determined to be missing (constructor `which` check or
+    // a prior spawn ENOENT), report UNSUPPORTED silently — callers (e.g. the
+    // radio controller) treat this as "audio unavailable, toggle is a no-op".
     if (this._state === "UNSUPPORTED") {
-      throw new Error(this._error ?? "mpv unsupported");
+      return;
     }
     if (this.proc && this._state !== "ERROR") {
       // Already started this session; if playing, nothing to do.
@@ -174,13 +187,27 @@ export class MpvStreamPlayer implements StreamPlayer {
 
     let proc: ReturnType<typeof Bun.spawn>;
     try {
-      proc = Bun.spawn([MPV_BIN, ...args], {
+      proc = this.spawn([MPV_BIN, ...args], {
         stdin: "ignore",
         stdout: "pipe", // mpv writes progress here; we parse it
         stderr: "pipe", // captured for error diagnostics, not parsed
       });
     } catch (e) {
-      this.setState("ERROR", `failed to spawn mpv: ${(e as Error).message}`);
+      // A missing binary surfaces here as an ENOENT-style error. That's an
+      // environment/availability problem, not a runtime playback fault —
+      // classify it UNSUPPORTED (no-op) rather than ERROR (loud), matching the
+      // constructor's `Bun.which` path. Resolves silently per the contract.
+      const code = (e as NodeJS.ErrnoException).code;
+      const msg = (e as Error).message;
+      if (code === "ENOENT" || /not found|no such file/i.test(msg)) {
+        this.setState(
+          "UNSUPPORTED",
+          `mpv binary not found (spawn failed: ${msg}). ` +
+            `Install mpv to enable audio playback.`,
+        );
+        return;
+      }
+      this.setState("ERROR", `failed to spawn mpv: ${msg}`);
       throw e;
     }
     this.proc = proc;

@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "description": "anomaly.fm radio plugin for the opencode TUI — statusline + mpv audio.",
   "type": "module",
-  "module": "src/index.ts",
+  "module": "src/index.tsx",
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./src/index.tsx",
     "./types": "./src/types.ts"
   },
   "scripts": {

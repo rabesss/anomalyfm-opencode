@@ -97,7 +97,10 @@ test("play() spawns mpv with the documented args", async () => {
   await Promise.resolve();
   expect(spawn).toHaveBeenCalledTimes(1);
 
-  const args = spawn.mock.calls[0][0] as string[];
+  // spawn is typed as a zero-arg mock, so .calls is [][]; the first call did
+  // pass args ([mpvBin, ...mpvArgs], opts) — read the args array via unknown
+  // (tsc-safe). calls[0] = [argsArray, opts]; calls[0][0] = the args array.
+  const args = (spawn.mock.calls as unknown as unknown[][])[0][0] as string[];
   expect(args[0]).toBe("mpv");
   expect(args).toContain("--no-video");
   expect(args).toContain("--profile=low-latency");

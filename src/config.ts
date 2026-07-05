@@ -15,7 +15,7 @@ export const DEFAULTS = {
   pollIntervalMs: 15_000,
   streamUrl: "https://anomaly.fm/radio",
   statusUrl: "https://anomaly.fm/feed/status.json",
-} as const;
+};
 
 export function resolveOptions(raw: unknown): PluginOptions & typeof DEFAULTS {
   const opts = (raw && typeof raw === "object" ? raw : {}) as Partial<PluginOptions>;

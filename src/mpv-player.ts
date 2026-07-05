@@ -242,9 +242,13 @@ export class MpvStreamPlayer implements StreamPlayer {
   private pumpStderr(proc: ReturnType<typeof Bun.spawn>) {
     const dec = new TextDecoder();
     let buf = "";
+    // We spawn with stderr: "pipe", so proc.stderr is a ReadableStream. Bun's
+    // Subprocess type still unions `number | undefined` for other stdio modes,
+    // which trips tsc's async-iterable check; narrow once at the use site.
+    const stderr = proc.stderr as ReadableStream<Uint8Array>;
     (async () => {
       try {
-        for await (const chunk of proc.stderr) {
+        for await (const chunk of stderr) {
           buf += dec.decode(chunk);
           let nl: number;
           while ((nl = buf.indexOf("\n")) >= 0) {
@@ -271,9 +275,11 @@ export class MpvStreamPlayer implements StreamPlayer {
   private startStdoutDrain(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
     const dec = new TextDecoder();
     let buf = "";
+    // See pumpStderr: we spawn with stdout: "pipe" so this is a ReadableStream.
+    const stdout = proc.stdout as ReadableStream<Uint8Array>;
     return (async () => {
       try {
-        for await (const chunk of proc.stdout) {
+        for await (const chunk of stdout) {
           buf += dec.decode(chunk);
           let nl: number;
           while ((nl = buf.indexOf("\n")) >= 0) {

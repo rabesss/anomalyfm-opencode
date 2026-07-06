@@ -1,0 +1,40 @@
+# CodeRabbit config for rabesss/anomalyfm-opencode
+# Docs: https://docs.coderabbit.ai/reference/configuration
+# Reads from the PR source branch (config edits take effect within the same PR).
+# Review policy lives in REVIEW.md; this file points at it as the source of truth.
+
+language: en-US
+tone_instructions: "Only flag issues introduced by this PR. Be concise; lead with severity; follow REVIEW.md. No speculative refactors."
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  poem: false
+  request_changes_workflow: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!bun.lock"
+    - "!**/*.md"
+  path_instructions:
+    - path: "src/**"
+      instructions: |
+        Apply REVIEW.md. Focus, in priority order: (1) true-pause — mpv must be
+        SIGKILL'd in pause()/teardown with no surviving process/socket; (2) mpv
+        stays --no-terminal with liveness-based detection — flag any
+        reintroduction of stdout/stderr parsing or --msg-level verbosity; (3)
+        renderLine output strings are pinned by test/statusline.test.ts — a change
+        to its output must update those tests in the same PR; (4) error handling
+        around Bun.spawn and the FSM not wedging in CONNECTING.
+        Do NOT flag: formatting, dependency versions, missing JSDoc on trivial
+        code, the Atomics.wait busy-reap in teardownSync (intentional, bounded).
+    - path: "test/**"
+      instructions: "Tests use injectable fakes (spawn, fake player, fake clock) — no real mpv or network. Flag tests that would make real network calls or spawn real processes."
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "REVIEW.md"
+      - "AGENTS.md"

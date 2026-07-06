@@ -12,3 +12,10 @@ results-verify-pause.csv
 scripts/smoke-load.ts
 
 docs/superpowers/
+.kiro/
+.claude/
+.gemini/skills/
+.github/skills/
+.agents/state/
+.desloppify/
+.kilocode/

@@ -18,12 +18,13 @@
  */
 
 import { createSignal } from "solid-js";
+import { t, fg } from "@opentui/core";
 
 import { StatusPoller, type StatusSnapshot } from "./poller.ts";
 import { RadioController, type ControllerState } from "./controller.ts";
 import { MpvStreamPlayer } from "./mpv-player.ts";
 import { NoAudioStreamPlayer } from "./player.ts";
-import { renderLine } from "./statusline.tsx";
+import { renderLine, bulletToken, glyphToken, type StatusToken } from "./statusline.tsx";
 import { resolveOptions } from "./config.ts";
 
 // Ambient opencode plugin types come from the @opencode-ai/plugin peer dep,
@@ -89,16 +90,38 @@ const plugin: TuiPluginModule = {
     // --- register the statusline slot (app_bottom, order 1000) ---
     // CORRECTION #3 vs. the brief: TuiSlotPlugin is Omit<SolidPlugin,"id"> &
     // { id?: never } (tui.d.ts:398-400), so the registration object must NOT
-    // carry an `id` — opencode assigns one internally and returns it. The slot
-    // render function returns a Solid JSX element, not a string: we wrap
-    // renderLine(...) in a <text> intrinsic (catalogue.d.ts: text: TextProps;
-    // TextProps.children accepts string).
+    // carry an `id` — opencode assigns one internally and returns it.
+    //
+    // Coloring: renderLine returns a flat string, but its shape is guaranteed —
+    // first char is always `◆`, last two are always ` ` + glyph (see truncate).
+    // We exploit that to paint three colored chunks via the typed styled-text
+    // API (`t` template tag + `fg()` colorizer from @opentui/core): the bullet
+    // (accent only when ON AIR, else muted), the body (always muted), and the
+    // glyph (warning on ERROR/UNSUPPORTED, else muted). Colors come from
+    // api.theme.current (live RGBA per the user's selected theme — no hardcoded
+    // hex), read lazily inside the render so a theme switch is picked up on the
+    // next poll/state change. Left-aligned: a status bar belongs at the left
+    // edge; wrapping in a <box justifyContent="flex-end"> would float it off
+    // into empty space on a wide terminal.
     api.slots.register({
       order: 1000,
       slots: {
-        app_bottom: () => (
-          <text>{renderLine(getSnapshot()?.status ?? null, getControllerState(), width())}</text>
-        ),
+        app_bottom: () => {
+          const snap = getSnapshot()?.status ?? null;
+          const state = getControllerState();
+          const line = renderLine(snap, state, width());
+          const cur = api.theme.current;
+          const resolve = (tok: StatusToken) => cur[tok];
+          // Build one StyledText with three differently-colored chunks. `fg()`
+          // takes a Color (RGBA | hex | css-name) and returns a chunk colorizer;
+          // cur.<token> is an RGBA, so this stays fully theme-driven.
+          const bullet = fg(resolve(bulletToken(snap)));
+          const body = fg(cur.textMuted);
+          const glyph = fg(resolve(glyphToken(state)));
+          return (
+            <text content={t`${bullet(line[0])}${body(line.slice(1, -1))}${glyph(line[line.length - 1])}`} />
+          );
+        },
       },
     });
 

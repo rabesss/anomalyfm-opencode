@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
-import { renderLine } from "../src/statusline.tsx";
+import { renderLine, bulletToken, glyphToken } from "../src/statusline.tsx";
 import type { StationStatus } from "../src/types.ts";
+import type { ControllerState } from "../src/controller.ts";
 
 const base: StationStatus = {
   station: "anomaly.fm", live: true, humans: 0, members: [], memberIds: [],
@@ -56,4 +57,38 @@ test("narrow width truncates the line, never breaks the glyph", () => {
   const line = renderLine(s, "PLAYING", 30);
   expect(line.length).toBeLessThanOrEqual(30);
   expect(line).toMatch(/[▶⏸⚠]$/); // glyph preserved at the tail
+});
+
+// --- bulletToken: accent only when a human is actually on air -----------------
+test("bulletToken: ON AIR (humans present) → accent", () => {
+  expect(bulletToken({ ...base, humans: 1, members: ["ryan"] })).toBe("accent");
+  expect(bulletToken({ ...base, humans: 2, members: [] })).toBe("accent");
+});
+
+test("bulletToken: RERUN → muted (not live, just playback)", () => {
+  expect(bulletToken({ ...base, humans: 0, rerun: "Jul 2 | David, vogel" }))
+    .toBe("textMuted");
+});
+
+test("bulletToken: INTERMISSION → muted", () => {
+  expect(bulletToken({ ...base, live: true })).toBe("textMuted");
+});
+
+test("bulletToken: OFF AIR → muted", () => {
+  expect(bulletToken({ ...base, live: false })).toBe("textMuted");
+});
+
+test("bulletToken: no snapshot yet → muted", () => {
+  expect(bulletToken(null)).toBe("textMuted");
+});
+
+// --- glyphToken: muted unless the player is in trouble -----------------------
+test("glyphToken: ERROR and UNSUPPORTED → warning", () => {
+  expect(glyphToken("ERROR")).toBe("warning");
+  expect(glyphToken("UNSUPPORTED")).toBe("warning");
+});
+
+test("glyphToken: healthy states → muted", () => {
+  const healthy: ControllerState[] = ["PLAYING", "PAUSED", "CONNECTING"];
+  for (const s of healthy) expect(glyphToken(s)).toBe("textMuted");
 });

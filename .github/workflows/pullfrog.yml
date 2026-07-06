@@ -1,0 +1,37 @@
+# Pullfrog code-review run. Routes at Z.AI Coding Plan GLM 5.2 via a private
+# OpenCode config, so Kilo Code Reviews (which loads a root opencode.json and
+# would otherwise fail model resolution) is unaffected — see doc §8.1 and REVIEW.md.
+#
+# Requires repo/org secret: ZAI_API_KEY  (Z.AI coding-plan key; matches {env:ZAI_API_KEY}
+# in .github/pullfrog-opencode.json). Set it in GitHub repo Settings → Secrets.
+name: Pullfrog
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false || github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pullfrog review
+        uses: pullfrog/pullfrog@v0
+        with:
+          mode: review
+        env:
+          # Non-listed OpenAI-compatible model — must match the provider/model id
+          # defined in .github/pullfrog-opencode.json (prefix "zai-coding-plan").
+          PULLFROG_MODEL: zai-coding-plan/glm-5.2
+          # Point Pullfrog at the PRIVATE config, never a root opencode.json
+          # (root config breaks Kilo Code Reviews' model resolution).
+          OPENCODE_CONFIG: ${{ github.workspace }}/.github/pullfrog-opencode.json
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}

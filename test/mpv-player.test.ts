@@ -88,11 +88,17 @@ function fakeMpvChild(): FakeProc {
 // suite snappy, long enough that a concurrently-scheduled exit() wins the race.
 const FAST_SETTLE_MS = 40;
 
+// Stub for the injectable `which` option: returns truthy so the constructor
+// proceeds to the spawn path regardless of whether mpv is installed on the
+// host machine. Makes the spawn/kill tests hermetic (AGENTS.md: no real mpv).
+const WHICH_FOUND = (_bin: string) => "/fake/path/mpv";
+
 test("play() spawns mpv with the documented args (incl. --no-terminal)", async () => {
   const proc = fakeMpvChild();
   const spawn = mock(() => proc);
   const player = new MpvStreamPlayer({
     spawn: spawn as never,
+    which: WHICH_FOUND,
     playSettleMs: FAST_SETTLE_MS,
   });
   const playP = player.play();
@@ -121,6 +127,7 @@ test("pause() kills the process; state returns to PAUSED", async () => {
   const spawn = mock(() => proc);
   const player = new MpvStreamPlayer({
     spawn: spawn as never,
+    which: WHICH_FOUND,
     playSettleMs: FAST_SETTLE_MS,
   });
 
@@ -137,18 +144,18 @@ test("pause() kills the process; state returns to PAUSED", async () => {
 });
 
 test("missing mpv → state UNSUPPORTED without throwing", async () => {
-  // A spawn that fails like Bun.spawn does when the binary is missing.
-  const enoent = new Error("spawn: mpv not found") as Error & { code: string };
-  enoent.code = "ENOENT";
-  const spawn = mock(() => {
-    throw enoent;
+  // which() returns null → constructor flips UNSUPPORTED before spawn is touched.
+  const spawn = mock(() => fakeMpvChild());
+  const player = new MpvStreamPlayer({
+    spawn: spawn as never,
+    which: () => null,
   });
-  const player = new MpvStreamPlayer({ spawn: spawn as never });
 
   // Per Option A: play() resolves (does NOT throw); state stays UNSUPPORTED.
   await player.play();
   expect(player.state).toBe("UNSUPPORTED");
   expect(player.error).toMatch(/mpv/);
+  expect(spawn).not.toHaveBeenCalled();
 });
 
 test("mpv exits during the settle window → ERROR", async () => {
@@ -156,6 +163,7 @@ test("mpv exits during the settle window → ERROR", async () => {
   const spawn = mock(() => proc);
   const player = new MpvStreamPlayer({
     spawn: spawn as never,
+    which: WHICH_FOUND,
     playSettleMs: 5_000, // long settle so the exit() below wins the race
   });
 
@@ -166,4 +174,55 @@ test("mpv exits during the settle window → ERROR", async () => {
   await expect(playP).rejects.toThrow(/exited before playback settled/);
   expect(player.state).toBe("ERROR");
   expect(player.error).toMatch(/exited before playback settled/);
+});
+
+test("pause() during the settle window → PAUSED (not ERROR)", async () => {
+  // Regression guard for the pause-during-settle race: toggling off while
+  // CONNECTING SIGKILLs mpv, which resolves proc.exited and (without the
+  // identity guard) would reject play() and flip state to ERROR after the
+  // PAUSED teardown set. The fake's kill() here mirrors real Bun.spawn by also
+  // resolving exited on SIGKILL — the existing fake only recorded the signal.
+  const encoder = new TextEncoder();
+  let stdoutController: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let exitResolve: ((code: number | null) => void) | null = null;
+  const killCalls: string[] = [];
+  const proc = {
+    stdout: new ReadableStream<Uint8Array>({ start(c) { stdoutController = c; } }),
+    stderr: new ReadableStream<Uint8Array>(),
+    pid: 4242,
+    exitCode: null as number | null,
+    signalCode: null as string | null,
+    killCalls,
+    kill: (sig: string = "SIGKILL") => {
+      killCalls.push(sig);
+      // Real SIGKILL reaps the process → proc.exited resolves. This is the
+      // behavior the recorded-signal-only fake above does NOT model, and it's
+      // exactly what triggers the race this test pins down.
+      proc.exitCode = null;
+      proc.signalCode = sig;
+      try { stdoutController?.close(); } catch {}
+      exitResolve?.(null);
+    },
+    exited: new Promise<number | null>((resolve) => { exitResolve = resolve; }),
+  };
+
+  const spawn = mock(() => proc as never);
+  const player = new MpvStreamPlayer({
+    spawn: spawn as never,
+    which: WHICH_FOUND,
+    playSettleMs: 5_000, // long settle so pause() lands inside it
+  });
+
+  const playP = player.play();
+  // Let play() reach CONNECTING + awaitSettled armed (settle timer pending).
+  await Promise.resolve();
+
+  // Toggle off mid-settle: SIGKILLs (resolving proc.exited), sets PAUSED.
+  player.pause();
+  expect(killCalls).toContain("SIGKILL");
+
+  // play() must resolve cleanly (not reject) and state must stay PAUSED — NOT
+  // flip to ERROR from the exit handler firing on the deliberate kill.
+  await expect(playP).resolves.toBeUndefined();
+  expect(player.state).toBe("PAUSED");
 });

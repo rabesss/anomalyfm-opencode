@@ -97,6 +97,13 @@ export interface MpvStreamPlayerOptions {
    * down without mpv installed and without real audio.
    */
   spawn?: typeof Bun.spawn;
+  /**
+   * Injectable binary resolver for testing. Defaults to `Bun.which`. The
+   * constructor probes for the mpv binary eagerly; in a clean CI container mpv
+   * isn't on PATH, so tests stub this truthy to exercise the spawn path
+   * regardless of the host machine. Mirrors the existing `spawn` seam.
+   */
+  which?: (bin: string) => string | null;
 }
 
 /**
@@ -115,6 +122,8 @@ export class MpvStreamPlayer implements StreamPlayer {
   private readonly playTimeoutMs: number;
   /** Injectable spawn (defaults to Bun.spawn) — exercised by contract tests. */
   private readonly spawn: typeof Bun.spawn;
+  /** Injectable binary resolver (defaults to Bun.which) — exercised by tests. */
+  private readonly which: (bin: string) => string | null;
 
   private proc: ReturnType<typeof Bun.spawn> | null = null;
   /** Disposer for the pending settle timer; cleared on resolve/teardown. */
@@ -130,9 +139,10 @@ export class MpvStreamPlayer implements StreamPlayer {
     this.playSettleMs = opts.playSettleMs ?? DEFAULT_PLAY_SETTLE_MS;
     this.playTimeoutMs = opts.playTimeoutMs ?? DEFAULT_PLAY_TIMEOUT_MS;
     this.spawn = opts.spawn ?? Bun.spawn;
+    this.which = opts.which ?? ((b) => Bun.which(b));
 
     // Detect missing binary eagerly and once, at construction.
-    if (!Bun.which(MPV_BIN)) {
+    if (!this.which(MPV_BIN)) {
       this._state = "UNSUPPORTED";
       this._error =
         `mpv binary not found on PATH (need '${MPV_BIN}'). ` +
@@ -211,6 +221,12 @@ export class MpvStreamPlayer implements StreamPlayer {
     try {
       await this.awaitSettled(proc);
     } catch (e) {
+      // If a concurrent pause()/teardown claimed the process while we were in
+      // the settle window, it already set PAUSED and nulled this.proc — don't
+      // clobber that with ERROR. The killed proc's exit resolves awaitSettled's
+      // exit handler and rejects here, but it's a deliberate teardown, not a
+      // connect failure. Resolve silently and let the PAUSED state stand.
+      if (this.proc !== proc) return;
       const msg = (e as Error).message;
       this.log(`[mpv] play() failed: ${msg}`);
       await this.teardown(); // best-effort cleanup before propagating
@@ -267,8 +283,13 @@ export class MpvStreamPlayer implements StreamPlayer {
       }, this.playTimeoutMs);
 
       // If mpv exits before the settle, it failed to open the stream.
+      // The identity guard mirrors the settle-timer's: a concurrent pause()/
+      // teardown SIGKILLs the proc and nulls this.proc, so this exit is a
+      // deliberate teardown, not a connect failure — resolve cleanly so play()
+      // returns and the PAUSED state teardown just set stays put.
       proc.exited.then((code) => {
         if (settled) return;
+        if (this.proc !== proc) { finish(); return; }
         finish(
           new Error(
             `mpv exited before playback settled (code=${proc.exitCode}, signal=${proc.signalCode} exitValue=${code})`,

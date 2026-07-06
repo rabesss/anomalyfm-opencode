@@ -5,8 +5,17 @@
 # Requires repo/org secret: ZAI_API_KEY  (Z.AI coding-plan key; matches {env:ZAI_API_KEY}
 # in .github/pullfrog-opencode.json). Set it in GitHub repo Settings → Secrets.
 name: Pullfrog
+run-name: ${{ inputs.name || github.workflow }}
 
 on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        type: string
+        description: Agent prompt
+      name:
+        type: string
+        description: Run name
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
@@ -14,19 +23,42 @@ on:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false || github.event_name == 'issue_comment'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
+      # Pullfrog mints short-lived GitHub App installation tokens via OIDC;
+      # without id-token: write the action fails before any review runs.
+      id-token: write
       contents: read
       pull-requests: write
       issues: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pullfrog review
+      - name: Pullfrog dispatched agent
+        if: github.event_name == 'workflow_dispatch'
         uses: pullfrog/pullfrog@v0
         with:
-          mode: review
+          prompt: ${{ inputs.prompt }}
+          model: zai-coding-plan/glm-5.2
+          push: disabled
+          status_checks: enabled
+        env:
+          # Non-listed OpenAI-compatible model — must match the provider/model id
+          # defined in .github/pullfrog-opencode.json (prefix "zai-coding-plan").
+          PULLFROG_MODEL: zai-coding-plan/glm-5.2
+          # Point Pullfrog at the PRIVATE config, never a root opencode.json
+          # (root config breaks Kilo Code Reviews' model resolution).
+          OPENCODE_CONFIG: ${{ github.workspace }}/.github/pullfrog-opencode.json
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+
+      - name: Pullfrog PR review
+        if: github.event_name != 'workflow_dispatch'
+        uses: pullfrog/pullfrog@v0
+        with:
+          prompt_file: .github/pullfrog-review-prompt.md
+          push: disabled
+          status_checks: enabled
         env:
           # Non-listed OpenAI-compatible model — must match the provider/model id
           # defined in .github/pullfrog-opencode.json (prefix "zai-coding-plan").

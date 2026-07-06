@@ -130,8 +130,6 @@ export class MpvStreamPlayer implements StreamPlayer {
   private settleDispose: (() => void) | null = null;
   /** Disposer for the hard-timeout ceiling; cleared on resolve/teardown. */
   private timeoutDispose: (() => void) | null = null;
-  /** Watcher on proc.exited that flips PLAYING→ERROR if mpv dies mid-playback. */
-  private exitWatcherDispose: (() => void) | null = null;
 
   constructor(opts: MpvStreamPlayerOptions = {}) {
     this.url = opts.url ?? ANOMALY_STREAM_URL;
@@ -236,17 +234,17 @@ export class MpvStreamPlayer implements StreamPlayer {
 
     // Once playing, watch for mid-playback death (e.g. network drops mpv after
     // the settle window). Flips PLAYING→ERROR so the controller can retry.
-    this.exitWatcherDispose = () => {
-      this.exitWatcherDispose = null;
-    };
-    proc.exited.then((code) => {
+    // NOTE: a `proc.exited.then(...)` handler can't be cancelled, so there is
+    // no dispose to store — the `this.proc === proc` identity guard below is
+    // the teardown protection (after pause()/teardown() nulls `this.proc`, this
+    // callback becomes a no-op).
+    proc.exited.then(() => {
       if (this.proc === proc && this._state === "PLAYING") {
         this.setState(
           "ERROR",
-          `mpv exited mid-playback (code=${proc.exitCode}, signal=${proc.signalCode} code=${code})`,
+          `mpv exited mid-playback (code=${proc.exitCode}, signal=${proc.signalCode})`,
         );
       }
-      this.exitWatcherDispose?.();
     });
   }
 
@@ -287,12 +285,12 @@ export class MpvStreamPlayer implements StreamPlayer {
       // teardown SIGKILLs the proc and nulls this.proc, so this exit is a
       // deliberate teardown, not a connect failure — resolve cleanly so play()
       // returns and the PAUSED state teardown just set stays put.
-      proc.exited.then((code) => {
+      proc.exited.then(() => {
         if (settled) return;
         if (this.proc !== proc) { finish(); return; }
         finish(
           new Error(
-            `mpv exited before playback settled (code=${proc.exitCode}, signal=${proc.signalCode} exitValue=${code})`,
+            `mpv exited before playback settled (code=${proc.exitCode}, signal=${proc.signalCode})`,
           ),
         );
       });
@@ -313,8 +311,6 @@ export class MpvStreamPlayer implements StreamPlayer {
     this.settleDispose = null;
     this.timeoutDispose?.();
     this.timeoutDispose = null;
-    this.exitWatcherDispose?.();
-    this.exitWatcherDispose = null;
     if (!proc) {
       this.setState("PAUSED");
       return;
@@ -359,8 +355,6 @@ export class MpvStreamPlayer implements StreamPlayer {
     this.settleDispose = null;
     this.timeoutDispose?.();
     this.timeoutDispose = null;
-    this.exitWatcherDispose?.();
-    this.exitWatcherDispose = null;
     if (!proc) {
       this.setState("PAUSED");
       return;

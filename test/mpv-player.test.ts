@@ -226,3 +226,58 @@ test("pause() during the settle window → PAUSED (not ERROR)", async () => {
   await expect(playP).resolves.toBeUndefined();
   expect(player.state).toBe("PAUSED");
 });
+
+test("mpv exits AFTER the settle window (mid-playback) → ERROR", async () => {
+  // Symmetric to the settle-window exit test, but exercises the post-settle
+  // watcher (the proc.exited.then armed at the tail of play()) that flips
+  // PLAYING→ERROR when mpv dies AFTER audio was already flowing — e.g. a
+  // network drop. This is the path that lets RadioController schedule a retry.
+  const proc = fakeMpvChild();
+  const spawn = mock(() => proc);
+  const player = new MpvStreamPlayer({
+    spawn: spawn as never,
+    which: WHICH_FOUND,
+    playSettleMs: FAST_SETTLE_MS,
+  });
+
+  // Let play() fully settle to PLAYING — the mid-playback watcher only arms
+  // once play() resolves.
+  await player.play();
+  expect(player.state).toBe("PLAYING");
+
+  // mpv dies mid-stream. proc.exited is the SAME promise used during settle,
+  // but the settle handler already short-circuited via `if (settled) return`,
+  // so this fires the watcher armed at the tail of play().
+  proc.exit(1);
+  await proc.exited; // let the .then callback run
+
+  expect(player.state).toBe("ERROR");
+  expect(player.error).toMatch(/exited mid-playback/);
+
+  player.pause();
+});
+
+test("post-settle exit watcher is inert after teardown", async () => {
+  // Regression guard for the dropped exitWatcherDispose (Finding C): after
+  // pause() tears the process down, a late proc.exited must NOT flip state
+  // back to ERROR. The `this.proc === proc` identity guard is the protection.
+  const proc = fakeMpvChild();
+  const spawn = mock(() => proc);
+  const player = new MpvStreamPlayer({
+    spawn: spawn as never,
+    which: WHICH_FOUND,
+    playSettleMs: FAST_SETTLE_MS,
+  });
+
+  await player.play();
+  expect(player.state).toBe("PLAYING");
+
+  player.pause();
+  expect(player.state).toBe("PAUSED");
+
+  // Late exit fires after teardown — must be a no-op.
+  proc.exit(1);
+  await proc.exited;
+
+  expect(player.state).toBe("PAUSED");
+});

@@ -39,9 +39,9 @@ Or install via opencode's plugin manager:
 
 ## Trigger playback
 
-`radio.toggle` is registered as a keymap command but left **unbound** by default (to avoid clobbering your keymap). Reach it through the **command palette** — press `Ctrl+P` (the `command_list` keybind), search "anomaly", and select **anomaly.fm: toggle playback**. Select it again to pause.
+Press **`leader>f`** (mnemonic: radio **f**requency) to tune in. Press it again to pause. The statusline glyph flips `⏸ → ▶` while playing and `▶ → ⏸` when paused.
 
-> **A note on key bindings.** opencode's `tui.json` `keybinds` section accepts only the built-in action names from its schema (e.g. `app_exit`, `command_list`, `session_new`) — an entry like `"radio.toggle"` would be silently dropped at startup as an unknown key. Binding a plugin command to a dedicated key therefore has to happen on the plugin side (via the `bindings` field of `api.keymap.registerLayer`), not in `tui.json`. Until that's wired up, use the command palette.
+> **Why a plugin-side binding?** opencode's `tui.json` `keybinds` section accepts only the built-in action names from its closed schema (e.g. `app_exit`, `command_list`, `session_new`) — an entry like `"radio.toggle"` would be silently dropped at startup as an unknown key. So the binding is wired into the plugin itself (via `api.keymap.registerLayer`'s `bindings` field). `leader>f` was chosen to avoid colliding with opencode's built-in leader chords (`1-9, a, b, c, e, g, h, l, m, n, q, r, s, t, u, x, y`).
 
 ## Options
 

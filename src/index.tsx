@@ -102,12 +102,17 @@ const plugin: TuiPluginModule = {
       },
     });
 
-    // --- register the radio.toggle keymap command (no default binding) ---
-    // The host returns a disposer; we capture it for lifecycle cleanup. Per
-    // spec Open Item there is intentionally no default keybind — users add one
-    // in their tui.json `keybinds` section. Command.run receives a context, but
-    // toggle needs nothing from it.
+    // --- register the radio.toggle keymap command + default binding ---
+    // Default chord is `leader>f` (mnemonic: radio **f**requency). Chosen to
+    // avoid colliding with opencode's built-in leader chords (which use
+    // 1-9, a,b,c,e,g,h,l,m,n,q,r,s,t,u,x,y). `leader>f` is free. Users can
+    // still rebind via the standard keymap-override mechanism if they prefer.
+    // tui.json's top-level `keybinds` schema is closed to built-in names, so
+    // the binding MUST be registered here in the layer, not in user config.
     const disposeKeymap = api.keymap.registerLayer({
+      bindings: [
+        { key: "leader>f", cmd: "radio.toggle", desc: "anomaly.fm: toggle playback" },
+      ],
       commands: [
         {
           name: "radio.toggle",

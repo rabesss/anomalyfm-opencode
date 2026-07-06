@@ -145,13 +145,20 @@ test("plugin registers app_bottom slot with order 1000", async () => {
   expect(api._recorded.slots[0]!.slots).toHaveProperty("app_bottom");
 });
 
-test("plugin registers a radio.toggle keymap command", async () => {
+test("plugin registers a radio.toggle keymap command + leader>f binding", async () => {
   const api = await mount();
   expect(api._recorded.keymapLayers).toHaveLength(1);
-  const cmds = api._recorded.keymapLayers[0]!.commands;
-  const toggle = cmds.find((c) => c.name === "radio.toggle");
+  const layer = api._recorded.keymapLayers[0]!;
+  const toggle = layer.commands.find((c) => c.name === "radio.toggle");
   expect(toggle).toBeDefined();
   expect(typeof toggle!.run).toBe("function");
+  // The command must carry a default key binding — tui.json's top-level
+  // keybinds schema is closed to built-in names, so the binding has to live
+  // in the layer. leader>f (radio frequency) avoids the built-in chords.
+  const bindings = layer.bindings ?? [];
+  const toggleBinding = bindings.find((b) => b.cmd === "radio.toggle");
+  expect(toggleBinding).toBeDefined();
+  expect(toggleBinding!.key).toBe("leader>f");
 });
 
 test("slot render is installed as a function (registration, not string)", async () => {

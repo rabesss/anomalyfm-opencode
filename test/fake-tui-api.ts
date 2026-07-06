@@ -21,9 +21,10 @@ export interface RecordedSlot {
   slots: Record<string, unknown>;
 }
 
-/** The recorded `keymap.registerLayer` payload: { commands: [...] }. */
+/** The recorded `keymap.registerLayer` payload. */
 export interface RecordedKeymapLayer {
   commands: Array<{ name: string; run: (ctx?: unknown) => unknown }>;
+  bindings?: Array<{ key: string; cmd?: string; desc?: string }>;
 }
 
 export interface FakeTuiApi {

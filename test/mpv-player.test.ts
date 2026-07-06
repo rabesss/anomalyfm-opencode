@@ -1,5 +1,5 @@
 import { test, expect, mock } from "bun:test";
-import { MpvStreamPlayer } from "../src/mpv-player.ts";
+import { MpvStreamPlayer, MPV_ARGS } from "../src/mpv-player.ts";
 
 /**
  * Fake mpv child process mimicking the bits of `ReturnType<typeof Bun.spawn>`
@@ -111,6 +111,8 @@ test("play() spawns mpv with the documented args (incl. --no-terminal)", async (
   expect(args).toContain("--no-video");
   expect(args).toContain("--profile=low-latency");
   expect(args.some((a) => a.startsWith("--stream-lavf-o=reconnect="))).toBe(true);
+  expect(args).toContain("--network-timeout=3"); // false-PLAYING connect cap (review G)
+  expect(args).toContain("--ytdl=no"); // disables yt-dlp on_load_fail mask (review G)
   expect(args).toContain("--no-terminal"); // silences the A: progress spam
   expect(args).toContain("https://anomaly.fm/radio");
 
@@ -120,6 +122,27 @@ test("play() spawns mpv with the documented args (incl. --no-terminal)", async (
 
   player.pause();
   proc.exit(0);
+});
+
+test("MPV_ARGS carries the false-PLAYING connect-cap + ytdl flags", () => {
+  // Regression guard for review G: against an unreachable-from-start stream,
+  // mpv blocks in connect() for ~120s, and its built-in ytdl_hook re-resolves
+  // the URL via yt-dlp on load failure — both keep mpv "alive" past the 4s
+  // settle window and fire a false PLAYING. --network-timeout=3 (< settle)
+  // bounds the connect phase; --ytdl=no disables the masking retry. Measured:
+  // blackhole exits non-zero in ~3.1s only when BOTH are present. This test
+  // pins the flags so a future refactor can't silently drop them. (A real
+  // blackhole integration test belongs in scripts/, not the unit suite, since
+  // the fake-spawn harness can't simulate an OS-level connect() block.)
+  const args = MPV_ARGS("https://anomaly.fm/radio");
+  expect(args).toContain("--network-timeout=3");
+  expect(args).toContain("--ytdl=no");
+  // The invariant that makes the cap work: network-timeout value < settle window.
+  const cap = args
+    .find((a) => a.startsWith("--network-timeout="))
+    ?.match(/^--network-timeout=(\d+)$/)?.[1];
+  expect(cap).toBeDefined();
+  expect(Number(cap)).toBeLessThan(4); // < DEFAULT_PLAY_SETTLE_MS (4s)
 });
 
 test("pause() kills the process; state returns to PAUSED", async () => {

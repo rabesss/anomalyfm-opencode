@@ -57,6 +57,31 @@ export const ANOMALY_STREAM_URL = "https://anomaly.fm/radio";
  *  --stream-lavf-o=...    ffmpeg-level reconnect: on network drop, retry forever
  *                         capped at a 10s backoff, on the SAME url. This is the
  *                         only reconnect layer; we do not implement our own.
+ *  --network-timeout=3    Bounds the network open+read phase at 3s. This is the
+ *                         connect-phase cap that makes liveness detection safe:
+ *                         without it, a blackholed/unreachable host makes mpv
+ *                         block in the initial TCP connect() for ~120s (Linux
+ *                         tcp_syn_retries) — mpv stays "alive" past the 4s
+ *                         settle window and the player fires a FALSE PLAYING.
+ *                         Measured: ffmpeg's connect_timeout/timeout (the
+ *                         --stream-lavf-o variants) did NOT bound the connect
+ *                         phase; only mpv's own --network-timeout did. INVARIANT:
+ *                         keep this value < DEFAULT_PLAY_SETTLE_MS (4s) so a
+ *                         stalled connect surfaces as a fast mpv exit → the
+ *                         settle-window ERROR path, never PLAYING.
+ *  --ytdl=no              DISABLE the youtube-dl/yt-dlp on_load_fail hook.
+ *                         Measured to be load-bearing alongside --network-timeout:
+ *                         when the network open fails, mpv's built-in ytdl_hook
+ *                         catches on_load_fail and re-resolves the URL via
+ *                         yt-dlp, which (for a dead host) itself blocks — keeping
+ *                         mpv alive past the settle and masking the connect
+ *                         failure regardless of any connect timeout. Alone,
+ *                         network-timeout still hung (exit 124); ytdl=no alone
+ *                         still hung; BOTH together exit non-zero in ~3.1s.
+ *                         anomaly.fm is a plain Icecast MP3 mount (never a
+ *                         yt-dlp URL), so this hook could never help — pure
+ *                         liability. (If ANOMALY_STREAM_URL is ever repointed at
+ *                         a yt-dlp-resolvable URL, this flag would break it.)
  *  --no-terminal          CRITICAL for resource use: tells mpv it has no
  *                         terminal, so it emits NO status output. Without this,
  *                         mpv spams ~14 `A:` progress lines/sec for its whole
@@ -72,6 +97,8 @@ export const MPV_ARGS = (url: string): string[] => [
   "--no-video",
   "--profile=low-latency",
   "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=10",
+  "--network-timeout=3", // connect+read cap; < DEFAULT_PLAY_SETTLE_MS (4s) — false-PLAYING guard
+  "--ytdl=no", // disables the on_load_fail yt-dlp retry that masks a connect failure
   "--no-terminal",
   url,
 ];

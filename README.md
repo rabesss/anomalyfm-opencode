@@ -39,9 +39,11 @@ Or install via opencode's plugin manager:
 
 ## Trigger playback
 
-Press **`leader>f`** (mnemonic: radio **f**requency) to tune in. Press it again to pause. The statusline glyph flips `⏸ → ▶` while playing and `▶ → ⏸` when paused.
+Open the command palette with **`Ctrl+P`**, search **"anomaly"**, and select **anomaly.fm: toggle playback** to tune in. Select it again to pause. The statusline glyph flips `⏸ → ▶` while playing and `▶ → ⏸` when paused.
 
-> **Why a plugin-side binding?** opencode's `tui.json` `keybinds` section accepts only the built-in action names from its closed schema (e.g. `app_exit`, `command_list`, `session_new`) — an entry like `"radio.toggle"` would be silently dropped at startup as an unknown key. So the binding is wired into the plugin itself (via `api.keymap.registerLayer`'s `bindings` field). `leader>f` was chosen to avoid colliding with opencode's built-in leader chords (`1-9, a, b, c, e, g, h, l, m, n, q, r, s, t, u, x, y`).
+The plugin adds this as an entry in opencode's existing command palette — it doesn't rebind or remove any of your current palette items.
+
+> **Why palette-only?** opencode's `tui.json` `keybinds` section accepts only the built-in action names from its closed schema (e.g. `app_exit`, `command_list`, `session_new`) — an entry like `"radio.toggle"` would be silently dropped at startup as an unknown key. So the command is surfaced via the palette (`namespace: "palette"` on the keymap command) rather than a dedicated chord. If you want a direct keybinding, the plugin would need to add a `bindings` entry to its `registerLayer` call — `tui.json` can't do it.
 
 ## Options
 

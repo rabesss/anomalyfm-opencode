@@ -102,25 +102,25 @@ const plugin: TuiPluginModule = {
       },
     });
 
-    // --- register the radio.toggle keymap command + default binding ---
-    // Default chord is `leader>f` (mnemonic: radio **f**requency). Chosen to
-    // avoid colliding with opencode's built-in leader chords (which use
-    // 1-9, a,b,c,e,g,h,l,m,n,q,r,s,t,u,x,y). `leader>f` is free. Users can
-    // still rebind via the standard keymap-override mechanism if they prefer.
-    // tui.json's top-level `keybinds` schema is closed to built-in names, so
-    // the binding MUST be registered here in the layer, not in user config.
+    // --- register the radio.toggle keymap command (appears in the Ctrl+P palette) ---
+    // The command is surfaced in opencode's existing command palette (Ctrl+P) via
+    // `namespace: "palette"` — the filter the palette queries with. No default
+    // key binding: the user invokes through the palette (search "anomaly", Enter),
+    // which adds an entry without removing or rebinding any existing palette item.
+    // tui.json's top-level `keybinds` schema is closed to built-in names, so a
+    // dedicated chord (if ever wanted) would also have to be wired here, not in
+    // user config.
     const disposeKeymap = api.keymap.registerLayer({
-      bindings: [
-        { key: "leader>f", cmd: "radio.toggle", desc: "anomaly.fm: toggle playback" },
-      ],
       commands: [
         {
           name: "radio.toggle",
+          namespace: "palette",
+          title: "anomaly.fm: toggle playback",
+          desc: "Tune in to / pause anomaly.fm",
+          category: "anomaly.fm",
           run: () => {
             void controller.toggle();
           },
-          title: "anomaly.fm: toggle playback",
-          desc: "Tune in to / pause anomaly.fm",
         },
       ],
     });

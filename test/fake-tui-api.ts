@@ -23,7 +23,18 @@ export interface RecordedSlot {
 
 /** The recorded `keymap.registerLayer` payload. */
 export interface RecordedKeymapLayer {
-  commands: Array<{ name: string; run: (ctx?: unknown) => unknown }>;
+  // The keymap Command has an index signature `[key: string]: unknown`, so
+  // custom fields like `namespace`, `title`, `desc`, `category` pass through.
+  // We type the load-bearing ones and allow the rest.
+  commands: Array<{
+    name: string;
+    run: (ctx?: unknown) => unknown;
+    namespace?: string;
+    title?: string;
+    desc?: string;
+    category?: string;
+    [key: string]: unknown;
+  }>;
   bindings?: Array<{ key: string; cmd?: string; desc?: string }>;
 }
 

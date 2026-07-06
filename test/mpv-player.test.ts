@@ -3,12 +3,15 @@ import { MpvStreamPlayer } from "../src/mpv-player.ts";
 
 /**
  * Fake mpv child process mimicking the bits of `ReturnType<typeof Bun.spawn>`
- * that MpvStreamPlayer actually touches: a `stdout`/`stderr` ReadableStream the
- * drain reads, a `kill(sig)` method, a `pid`, and an `exited` Promise plus
- * `exitCode`/`signalCode` for the early-exit rejection path in `awaitPlaying`.
+ * that MpvStreamPlayer actually touches under the liveness-detection design:
+ * a `stdout`/`stderr` (present but never read under --no-terminal), a
+ * `kill(sig)` method, a `pid`, and an `exited` Promise plus `exitCode`/
+ * `signalCode` for the settle-window detection.
  *
- * Lines queued via `emit()` are pushed into the stdout stream the first time
- * something reads it (the player's drain). Call `exit()` to resolve `exited`.
+ * Detection is now liveness-based: `play()` resolves once mpv survives a settle
+ * window, and rejects if the proc exits first. So the test driver is the
+ * real `setTimeout` behind `playSettleMs` plus `proc.exit()` — no stdout lines
+ * to emit. The `emit()` helper is retained only for shape compatibility.
  */
 interface FakeProc {
   stdout: ReadableStream<Uint8Array>;
@@ -32,15 +35,11 @@ function fakeMpvChild(): FakeProc {
   let exitResolve: ((code: number | null) => void) | null = null;
   const killCalls: string[] = [];
 
-  // The streams are constructed lazily-pull: Bun.spawn returns streams that
-  // emit nothing until produced. We push queued lines on first pull so the
-  // order (spawn -> emit -> drain reads) is robust to microtask timing.
   const stdout = new ReadableStream<Uint8Array>({
     start(controller) {
       stdoutController = controller;
     },
     pull(controller) {
-      // Flush anything queued then idle; more can arrive via emit().
       for (const line of queued.splice(0)) {
         controller.enqueue(encoder.encode(line));
       }
@@ -67,8 +66,6 @@ function fakeMpvChild(): FakeProc {
     }),
     emit(line: string) {
       const encoded = encoder.encode(line);
-      // If the controller is active, enqueue directly (covers lines emitted
-      // after the drain has started pulling).
       if (stdoutController) {
         stdoutController.enqueue(encoded);
       } else {
@@ -86,46 +83,48 @@ function fakeMpvChild(): FakeProc {
   };
 }
 
-test("play() spawns mpv with the documented args", async () => {
+// Tiny settle window so liveness-based play() resolves fast in tests, while
+// still exercising the real setTimeout → PLAYING path. Short enough to keep the
+// suite snappy, long enough that a concurrently-scheduled exit() wins the race.
+const FAST_SETTLE_MS = 40;
+
+test("play() spawns mpv with the documented args (incl. --no-terminal)", async () => {
   const proc = fakeMpvChild();
   const spawn = mock(() => proc);
-  const player = new MpvStreamPlayer({ spawn: spawn as never });
+  const player = new MpvStreamPlayer({
+    spawn: spawn as never,
+    playSettleMs: FAST_SETTLE_MS,
+  });
   const playP = player.play();
 
-  // play() doesn't resolve until AO: + A: advance appear on stdout.
-  // Yield once so the constructor's state checks and spawn call settle.
   await Promise.resolve();
   expect(spawn).toHaveBeenCalledTimes(1);
 
-  // spawn is typed as a zero-arg mock, so .calls is [][]; the first call did
-  // pass args ([mpvBin, ...mpvArgs], opts) — read the args array via unknown
-  // (tsc-safe). calls[0] = [argsArray, opts]; calls[0][0] = the args array.
   const args = (spawn.mock.calls as unknown as unknown[][])[0][0] as string[];
   expect(args[0]).toBe("mpv");
   expect(args).toContain("--no-video");
   expect(args).toContain("--profile=low-latency");
   expect(args.some((a) => a.startsWith("--stream-lavf-o=reconnect="))).toBe(true);
+  expect(args).toContain("--no-terminal"); // silences the A: progress spam
   expect(args).toContain("https://anomaly.fm/radio");
 
-  // Resolve play(): emit the two lines awaitPlaying watches for.
-  proc.emit("AO: [pipewire] 48000Hz mono 1ch floatp\n");
-  proc.emit("A: 00:00:01\n");
+  // play() resolves by surviving the settle window — no AO/A lines to emit.
   await playP;
   expect(player.state).toBe("PLAYING");
 
-  // Tear down so the stdout drain doesn't keep the test alive.
-  proc.exit(0);
   player.pause();
+  proc.exit(0);
 });
 
 test("pause() kills the process; state returns to PAUSED", async () => {
   const proc = fakeMpvChild();
   const spawn = mock(() => proc);
-  const player = new MpvStreamPlayer({ spawn: spawn as never });
+  const player = new MpvStreamPlayer({
+    spawn: spawn as never,
+    playSettleMs: FAST_SETTLE_MS,
+  });
 
   const playP = player.play();
-  proc.emit("AO: [pipewire] 48000Hz mono 1ch floatp\n");
-  proc.emit("A: 00:00:02\n");
   await playP;
   expect(player.state).toBe("PLAYING");
 
@@ -150,4 +149,21 @@ test("missing mpv → state UNSUPPORTED without throwing", async () => {
   await player.play();
   expect(player.state).toBe("UNSUPPORTED");
   expect(player.error).toMatch(/mpv/);
+});
+
+test("mpv exits during the settle window → ERROR", async () => {
+  const proc = fakeMpvChild();
+  const spawn = mock(() => proc);
+  const player = new MpvStreamPlayer({
+    spawn: spawn as never,
+    playSettleMs: 5_000, // long settle so the exit() below wins the race
+  });
+
+  const playP = player.play();
+  // mpv fails to open the stream and exits non-zero before the settle elapses.
+  proc.exit(1);
+
+  await expect(playP).rejects.toThrow(/exited before playback settled/);
+  expect(player.state).toBe("ERROR");
+  expect(player.error).toMatch(/exited before playback settled/);
 });

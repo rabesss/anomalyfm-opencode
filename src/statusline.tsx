@@ -9,10 +9,23 @@
  * controller state, and a terminal width, produce the exact statusline string.
  * The producer copy rules are pinned by the snapshot tests in
  * `test/statusline.test.ts` — those are the spec; this code conforms to them.
+ *
+ * `bulletToken`/`glyphToken` name which opencode theme token (see TuiTheme in
+ * @opencode-ai/plugin/tui) the host should use to paint the leading bullet and
+ * the trailing glyph. They return a token *name* (not an RGBA) so this module
+ * stays free of any opencode/@opentui import — the host (src/index.tsx) resolves
+ * the name to a live color via `api.theme.current`. Color policy, not copy:
+ * only the bullet and glyph carry meaning; the body is always muted.
  */
 
 import { deriveAirState, type StationStatus } from "./types.ts";
 import type { ControllerState } from "./controller.ts";
+
+/**
+ * The subset of opencode theme tokens the statusline paints with. These are
+ * keys on `TuiThemeCurrent` (all `RGBA`); the host indexes into that object.
+ */
+export type StatusToken = "accent" | "warning" | "textMuted";
 
 /** Trailing glyph per controller state. CONNECTING shares PAUSED's ⏸. */
 const GLYPH: Record<ControllerState, string> = {
@@ -22,6 +35,24 @@ const GLYPH: Record<ControllerState, string> = {
   ERROR: "⚠",
   UNSUPPORTED: "⚠",
 };
+
+/**
+ * Bullet color policy: muted by default, lighting up with the accent token only
+ * when a human is actually on air (deriveAirState === "ON_AIR"). This is the one
+ * state worth pulling the eye to; every other air-state stays ambient.
+ */
+export function bulletToken(s: StationStatus | null): StatusToken {
+  if (s && deriveAirState(s) === "ON_AIR") return "accent";
+  return "textMuted";
+}
+
+/**
+ * Glyph color policy: muted unless the player is in trouble, then warning —
+ * matching opencode's own "needs attention" tone (the Tip badge).
+ */
+export function glyphToken(state: ControllerState): StatusToken {
+  return state === "ERROR" || state === "UNSUPPORTED" ? "warning" : "textMuted";
+}
 
 /**
  * Render the one-line status strip. Layout:

@@ -1,22 +1,29 @@
 /**
  * MpvStreamPlayer — mpv-subprocess backend for the anomaly.fm opencode TUI plugin.
  *
- * Strategy: spawn `mpv` against the live Icecast MP3 mount and watch its stdout
- * log to know when playback has actually started. `play()` resolves once mpv
- * reports an audio output is open AND the audio position is advancing — the most
- * direct possible signal that real audio is flowing. `pause()` is a hard
- * teardown: SIGKILL the process and await its exit so that, on return, there is
- * no mpv process, no decode work, and no open `/radio` socket.
+ * Strategy: spawn `mpv` against the live Icecast MP3 mount in `--no-terminal`
+ * mode and treat liveness as the playback signal. `play()` resolves once mpv
+ * has stayed alive past a short settle window — if mpv couldn't open the
+ * stream it exits within a couple seconds, so survival past the settle means
+ * audio is flowing. `pause()` is a hard teardown: SIGKILL the process and await
+ * its exit so that, on return, there is no mpv process, no decode work, and no
+ * open `/radio` socket.
  *
- * Why stdout parsing (not IPC)?
- *   We tried `--input-ipc-server` (JSON unix socket) first — it's the textbook
- *   approach. Under `Bun.spawn`, mpv connects to the stream and runs, but
- *   *never creates the IPC socket file* in this environment (mpv 0.41.0,
- *   Bun 1.3.14, Linux). It also never creates it under `--no-terminal` even
- *   from a shell. Removing `--no-terminal` and reading mpv's own progress log
- *   (`AO:` = audio device opened; `A: 00:00:0X` = position advancing) is fully
- *   reliable and needs no second channel. mpv detects it has no TTY (its stdio
- *   is piped) so it never tries to render a curses UI.
+ * Why --no-terminal (not stdout parsing, not IPC)?
+ *   Earlier versions parsed mpv's verbose stdout (`AO:` = audio output opened;
+ *   `A:` = position advancing) to detect playback start. That required keeping
+ *   mpv verbose, and mpv emits ~14 `A:` progress lines/sec for its entire
+ *   lifetime. Decoding + splitting every one of those lines in our JS event
+ *   loop cost ~35% sustained CPU in the opencode host process while playing.
+ *   `--no-terminal` makes mpv emit ZERO bytes while audio still plays
+ *   (measured: 0 lines / 6s). That eliminates the drain work entirely; the
+ *   cost of playing collapses to mpv's own ~1% decode + our near-idle poller.
+ *   We pay for it with a ~4s "CONNECTING" settle window before the glyph flips
+ *   to PLAYING, which is the right trade for a 35x CPU reduction.
+ *
+ *   We also tried `--input-ipc-server` (JSON unix socket) earlier — under
+ *   Bun.spawn, mpv connects and runs but never creates the socket file in this
+ *   environment (mpv 0.41.0, Bun 1.3.14, Linux). IPC is off the table.
  *
  * Ground truth respected (see docs/superpowers/specs/ground-truth-findings.md):
  *  - Stream: https://anomaly.fm/radio, Icecast 2.4.4, MP3 48kHz mono 96kbps.
@@ -50,14 +57,13 @@ export const ANOMALY_STREAM_URL = "https://anomaly.fm/radio";
  *  --stream-lavf-o=...    ffmpeg-level reconnect: on network drop, retry forever
  *                         capped at a 10s backoff, on the SAME url. This is the
  *                         only reconnect layer; we do not implement our own.
- *  --msg-level=cplayer=v  emit verbose cplayer lines to stdout so we can detect
- *                         playback start (AO: + A: positions). Verbose is fine:
- *                         the volume is a few lines/sec.
- *
- * Deliberately NOT used:
- *  --no-terminal          In this env it suppresses ALL stdout/stderr AND blocks
- *                         IPC socket creation. We pipe stdio instead, which gives
- *                         us the logs AND keeps mpv from touching the TTY.
+ *  --no-terminal          CRITICAL for resource use: tells mpv it has no
+ *                         terminal, so it emits NO status output. Without this,
+ *                         mpv spams ~14 `A:` progress lines/sec for its whole
+ *                         lifetime, which our (now-removed) stdout drain had to
+ *                         decode line-by-line — costing ~35% host CPU. With it,
+ *                         stdout/stderr stay empty and we detect playback by
+ *                         liveness instead. See class docstring.
  *
  * NOTE: no `--` separator before the URL is needed here because mpv accepts the
  * URL as the final positional argument; we keep the array minimal.
@@ -66,32 +72,22 @@ export const MPV_ARGS = (url: string): string[] => [
   "--no-video",
   "--profile=low-latency",
   "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=10",
-  "--msg-level=cplayer=v",
+  "--no-terminal",
   url,
 ];
 
 const MPV_BIN = "mpv";
 
-/** Small bounded sleeper: rejects if `deadlineMs` elapses first. */
-function withTimeout<T>(p: Promise<T>, deadlineMs: number, msg: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(msg)), deadlineMs);
-    p.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(t);
-        reject(e);
-      },
-    );
-  });
-}
+/** Default settle window: mpv must survive this long after spawn to count as playing. */
+const DEFAULT_PLAY_SETTLE_MS = 4_000;
+/** Hard ceiling on how long play() will wait (belt-and-suspenders over the settle). */
+const DEFAULT_PLAY_TIMEOUT_MS = 20_000;
 
 export interface MpvStreamPlayerOptions {
   url?: string;
-  /** Timeout (ms) to wait for playback start after spawn. */
+  /** Settle window (ms): if mpv is still alive at this point, declare PLAYING. */
+  playSettleMs?: number;
+  /** Hard ceiling (ms) on the whole play() wait. Defaults to 20s. */
   playTimeoutMs?: number;
   /** Logger; defaults to no-op. */
   log?: (...args: unknown[]) => void;
@@ -102,15 +98,6 @@ export interface MpvStreamPlayerOptions {
    */
   spawn?: typeof Bun.spawn;
 }
-
-// Regexes for the two stdout signals we care about. mpv lines look like:
-//   AO: [pipewire] 48000Hz mono 1ch floatp
-//   A: 00:00:04 / 00:00:09 (44%) Cache: 5.4s/182KB
-// "audio output opened" + "audio position advancing past zero" = playing.
-const RE_AO_OPEN = /^AO:\s/;
-// `A: hh:mm:ss` advancing line; require a non-zero second or any sub-second
-// advance to be sure it's actually flowing (not parked at 00:00:00).
-const RE_A_ADVANCE = /^A:\s00:00:0[1-9]/;
 
 /**
  * StreamPlayer backed by a child `mpv` process.
@@ -124,19 +111,24 @@ export class MpvStreamPlayer implements StreamPlayer {
   private _error: string | undefined;
   private readonly url: string;
   private readonly log: (...a: unknown[]) => void;
+  private readonly playSettleMs: number;
   private readonly playTimeoutMs: number;
   /** Injectable spawn (defaults to Bun.spawn) — exercised by contract tests. */
   private readonly spawn: typeof Bun.spawn;
 
   private proc: ReturnType<typeof Bun.spawn> | null = null;
-  private stdoutParser: ((line: string) => void) | null = null;
-  /** Drains mpv stdout for the process's entire lifetime. See startStdoutDrain. */
-  private drainHandle: Promise<void> | null = null;
+  /** Disposer for the pending settle timer; cleared on resolve/teardown. */
+  private settleDispose: (() => void) | null = null;
+  /** Disposer for the hard-timeout ceiling; cleared on resolve/teardown. */
+  private timeoutDispose: (() => void) | null = null;
+  /** Watcher on proc.exited that flips PLAYING→ERROR if mpv dies mid-playback. */
+  private exitWatcherDispose: (() => void) | null = null;
 
   constructor(opts: MpvStreamPlayerOptions = {}) {
     this.url = opts.url ?? ANOMALY_STREAM_URL;
     this.log = opts.log ?? (() => {});
-    this.playTimeoutMs = opts.playTimeoutMs ?? 20_000;
+    this.playSettleMs = opts.playSettleMs ?? DEFAULT_PLAY_SETTLE_MS;
+    this.playTimeoutMs = opts.playTimeoutMs ?? DEFAULT_PLAY_TIMEOUT_MS;
     this.spawn = opts.spawn ?? Bun.spawn;
 
     // Detect missing binary eagerly and once, at construction.
@@ -189,8 +181,8 @@ export class MpvStreamPlayer implements StreamPlayer {
     try {
       proc = this.spawn([MPV_BIN, ...args], {
         stdin: "ignore",
-        stdout: "pipe", // mpv writes progress here; we parse it
-        stderr: "pipe", // captured for error diagnostics, not parsed
+        stdout: "pipe", // --no-terminal → mpv writes nothing; pipe never read
+        stderr: "pipe", // captured but not parsed; stays empty under --no-terminal
       });
     } catch (e) {
       // A missing binary surfaces here as an ENOENT-style error. That's an
@@ -212,23 +204,12 @@ export class MpvStreamPlayer implements StreamPlayer {
     }
     this.proc = proc;
 
-    // Surface mpv stderr (fatal errors etc.) into our log for debuggability.
-    this.pumpStderr(proc);
-
-    // CRITICAL: drain mpv stdout for the process's ENTIRE lifetime. mpv writes
-    // progress lines (A: ...) continuously while playing; if nothing reads the
-    // pipe, its kernel buffer (~64KiB) fills within seconds and mpv BLOCKS on
-    // write — which looks like a hang or causes Bun to tear it down. The drain
-    // feeds each line to `stdoutParser`, which observers (awaitPlaying, and
-    // later a status poller) can swap in.
-    this.drainHandle = this.startStdoutDrain(proc);
-
+    // Detection by liveness: race proc.exited against the settle timer. If mpv
+    // exits before the settle elapses, it couldn't open the stream → ERROR. If
+    // it survives the settle, audio is flowing → PLAYING. The hard timeout is a
+    // ceiling so a pathological mpv that neither plays nor exits can't hang us.
     try {
-      await withTimeout(
-        this.awaitPlaying(proc),
-        this.playTimeoutMs,
-        `mpv did not reach PLAYING within ${this.playTimeoutMs}ms`,
-      );
+      await this.awaitSettled(proc);
     } catch (e) {
       const msg = (e as Error).message;
       this.log(`[mpv] play() failed: ${msg}`);
@@ -236,102 +217,63 @@ export class MpvStreamPlayer implements StreamPlayer {
       this.setState("ERROR", msg);
       throw e;
     }
-  }
 
-  /** Pump mpv stderr to our log without blocking; surface fatal lines. */
-  private pumpStderr(proc: ReturnType<typeof Bun.spawn>) {
-    const dec = new TextDecoder();
-    let buf = "";
-    // We spawn with stderr: "pipe", so proc.stderr is a ReadableStream. Bun's
-    // Subprocess type still unions `number | undefined` for other stdio modes,
-    // which trips tsc's async-iterable check; narrow once at the use site.
-    const stderr = proc.stderr as ReadableStream<Uint8Array>;
-    (async () => {
-      try {
-        for await (const chunk of stderr) {
-          buf += dec.decode(chunk);
-          let nl: number;
-          while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl).trim();
-            buf = buf.slice(nl + 1);
-            if (line) this.log(`[mpv:stderr] ${line}`);
-          }
-        }
-      } catch {
-        /* process likely gone */
+    // Once playing, watch for mid-playback death (e.g. network drops mpv after
+    // the settle window). Flips PLAYING→ERROR so the controller can retry.
+    this.exitWatcherDispose = () => {
+      this.exitWatcherDispose = null;
+    };
+    proc.exited.then((code) => {
+      if (this.proc === proc && this._state === "PLAYING") {
+        this.setState(
+          "ERROR",
+          `mpv exited mid-playback (code=${proc.exitCode}, signal=${proc.signalCode} code=${code})`,
+        );
       }
-    })();
+      this.exitWatcherDispose?.();
+    });
   }
 
   /**
-   * Drain mpv stdout for the process's entire lifetime, feeding each line to
-   * `this.stdoutParser` (which observers may install/swap). Lives until stdout
-   * closes (process exit). Returns a promise that resolves when the drain ends.
-   *
-   * This MUST keep running after play() resolves: mpv writes `A:` progress
-   * continuously, and an unread pipe buffer (~64KiB) would back-pressure mpv
-   * to a stall within seconds.
+   * Resolve once mpv has survived the settle window. Reject if mpv exits first
+   * (couldn't open the stream) or if the hard timeout elapses.
    */
-  private startStdoutDrain(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
-    const dec = new TextDecoder();
-    let buf = "";
-    // See pumpStderr: we spawn with stdout: "pipe" so this is a ReadableStream.
-    const stdout = proc.stdout as ReadableStream<Uint8Array>;
-    return (async () => {
-      try {
-        for await (const chunk of stdout) {
-          buf += dec.decode(chunk);
-          let nl: number;
-          while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl);
-            buf = buf.slice(nl + 1);
-            this.stdoutParser?.(line);
-          }
-        }
-      } catch {
-        /* process likely gone */
-      }
-    })();
-  }
-
-  /**
-   * Resolve once mpv's stdout shows audio is open AND the position has advanced
-   * past zero. Registers an observer on the (already-running) stdout drain.
-   * Rejects if the process exits before playback starts.
-   */
-  private awaitPlaying(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+  private awaitSettled(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      let aoOpened = false;
       let settled = false;
       const finish = (err?: Error) => {
         if (settled) return;
         settled = true;
-        // Detach THIS observer; the drain keeps running for the lifetime.
-        if (this.stdoutParser === observer) this.stdoutParser = null;
+        this.settleDispose?.();
+        this.settleDispose = null;
+        this.timeoutDispose?.();
+        this.timeoutDispose = null;
         err ? reject(err) : resolve();
       };
-      const observer = (line: string) => {
-        if (RE_AO_OPEN.test(line)) {
-          aoOpened = true;
-          this.log(`[mpv] audio output opened`);
-        }
-        if (aoOpened && RE_A_ADVANCE.test(line)) {
-          this.setState("PLAYING");
-          this.log(`[mpv] playback advancing: ${line.trim()}`);
-          finish();
-        }
-      };
-      this.stdoutParser = observer;
 
-      // If the process dies during connect, reject loudly.
-      proc.exited.then(() => {
-        if (!settled) {
-          finish(
-            new Error(
-              `mpv exited (code=${proc.exitCode}, signal=${proc.signalCode}) before playback started`,
-            ),
-          );
-        }
+      // Settle timer: mpv survived long enough → declare PLAYING.
+      this.settleDispose = realTimer(() => {
+        if (this.proc !== proc) return; // torn down concurrently
+        this.setState("PLAYING");
+        this.log(`[mpv] playback settled (alive past ${this.playSettleMs}ms)`);
+        finish();
+      }, this.playSettleMs);
+
+      // Hard ceiling: if neither settle nor exit fired, fail loudly.
+      this.timeoutDispose = realTimer(() => {
+        finish(
+          new Error(`mpv did not settle within ${this.playTimeoutMs}ms`),
+        );
+      }, this.playTimeoutMs);
+
+      // If mpv exits before the settle, it failed to open the stream.
+      proc.exited.then((code) => {
+        if (settled) return;
+        finish(
+          new Error(
+            `mpv exited before playback settled (code=${proc.exitCode}, signal=${proc.signalCode} exitValue=${code})`,
+          ),
+        );
       });
     });
   }
@@ -342,11 +284,16 @@ export class MpvStreamPlayer implements StreamPlayer {
     this.teardownSync();
   }
 
-  /** Synchronous teardown: SIGKILL + brief bounded reap wait. */
+  /** Synchronous teardown: cancel timers + SIGKILL + brief bounded reap wait. */
   private teardownSync() {
     const proc = this.proc;
-    this.stdoutParser = null;
-    this.drainHandle = null;
+    // Cancel any pending settle/timeout so a late fire can't flip state after kill.
+    this.settleDispose?.();
+    this.settleDispose = null;
+    this.timeoutDispose?.();
+    this.timeoutDispose = null;
+    this.exitWatcherDispose?.();
+    this.exitWatcherDispose = null;
     if (!proc) {
       this.setState("PAUSED");
       return;
@@ -387,8 +334,12 @@ export class MpvStreamPlayer implements StreamPlayer {
   /** Async teardown used by play()'s error path. */
   private async teardown() {
     const proc = this.proc;
-    this.stdoutParser = null;
-    this.drainHandle = null;
+    this.settleDispose?.();
+    this.settleDispose = null;
+    this.timeoutDispose?.();
+    this.timeoutDispose = null;
+    this.exitWatcherDispose?.();
+    this.exitWatcherDispose = null;
     if (!proc) {
       this.setState("PAUSED");
       return;
@@ -402,6 +353,29 @@ export class MpvStreamPlayer implements StreamPlayer {
     this.proc = null;
     this.setState("PAUSED");
   }
+}
+
+/** Small bounded sleeper: rejects if `deadlineMs` elapses first. */
+function withTimeout<T>(p: Promise<T>, deadlineMs: number, msg: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(msg)), deadlineMs);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** Minimal setTimeout wrapper returning a dispose fn, mirroring controller.ts. */
+function realTimer(fn: () => void, ms: number): () => void {
+  const id = setTimeout(fn, ms);
+  return () => clearTimeout(id);
 }
 
 /**

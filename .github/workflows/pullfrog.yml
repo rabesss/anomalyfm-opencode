@@ -1,12 +1,6 @@
-# Pullfrog code-review run. Routes at Z.AI Coding Plan GLM 5.2 via a private
-# OpenCode config, so Kilo Code Reviews (which loads a root opencode.json and
-# would otherwise fail model resolution) is unaffected — see doc §8.1 and REVIEW.md.
-#
-# Requires repo/org secret: ZAI_API_KEY  (Z.AI coding-plan key; matches {env:ZAI_API_KEY}
-# in .github/pullfrog-opencode.json). Set it in GitHub repo Settings → Secrets.
+# PULLFROG ACTION — DO NOT EDIT EXCEPT WHERE INDICATED
 name: Pullfrog
 run-name: ${{ inputs.name || github.workflow }}
-
 on:
   workflow_dispatch:
     inputs:
@@ -16,54 +10,54 @@ on:
       name:
         type: string
         description: Run name
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  issue_comment:
-    types: [created]
+
+permissions:
+  contents: read
 
 jobs:
-  review:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment' || github.event.pull_request.draft == false
+  pullfrog:
     runs-on: ubuntu-latest
     permissions:
-      # Pullfrog mints short-lived GitHub App installation tokens via OIDC;
-      # without id-token: write the action fails before any review runs.
       id-token: write
       contents: read
-      pull-requests: write
-      issues: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Pullfrog dispatched agent
-        if: github.event_name == 'workflow_dispatch'
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - name: Run agent
         uses: pullfrog/pullfrog@v0
         with:
           prompt: ${{ inputs.prompt }}
           model: zai-coding-plan/glm-5.2
-          push: disabled
-          status_checks: enabled
         env:
-          # Non-listed OpenAI-compatible model — must match the provider/model id
-          # defined in .github/pullfrog-opencode.json (prefix "zai-coding-plan").
           PULLFROG_MODEL: zai-coding-plan/glm-5.2
-          # Point Pullfrog at the PRIVATE config, never a root opencode.json
-          # (root config breaks Kilo Code Reviews' model resolution).
           OPENCODE_CONFIG: ${{ github.workspace }}/.github/pullfrog-opencode.json
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
 
-      - name: Pullfrog PR review
-        if: github.event_name != 'workflow_dispatch'
-        uses: pullfrog/pullfrog@v0
-        with:
-          prompt_file: .github/pullfrog-review-prompt.md
-          push: disabled
-          status_checks: enabled
-        env:
-          # Non-listed OpenAI-compatible model — must match the provider/model id
-          # defined in .github/pullfrog-opencode.json (prefix "zai-coding-plan").
-          PULLFROG_MODEL: zai-coding-plan/glm-5.2
-          # Point Pullfrog at the PRIVATE config, never a root opencode.json
-          # (root config breaks Kilo Code Reviews' model resolution).
-          OPENCODE_CONFIG: ${{ github.workspace }}/.github/pullfrog-opencode.json
-          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          # add at least one provider API key
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_GENERATIVE_AI_API_KEY:
+            ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+
+          # for Amazon Bedrock (https://docs.pullfrog.com/bedrock)
+          # AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+          # AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          # AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # AWS_REGION: us-east-1
+          # BEDROCK_MODEL_ID: <bedrock-model-id>
+
+          # for Google Vertex AI (https://docs.pullfrog.com/vertex)
+          # VERTEX_SERVICE_ACCOUNT_JSON: >-
+          #   ${{ secrets.VERTEX_SERVICE_ACCOUNT_JSON }}
+          # GOOGLE_CLOUD_PROJECT: my-project
+          # VERTEX_LOCATION: global
+          # VERTEX_MODEL_ID: <vertex-model-id>

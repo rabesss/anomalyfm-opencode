@@ -1,0 +1,8 @@
+{
+  "icestats": {
+    "source": [
+      { "listeners": 3, "listenurl": "http://anomaly.fm:8000/station/fallback.mp3" },
+      { "listeners": 10, "listenurl": "http://anomaly.fm:8000/radio" }
+    ]
+  }
+}

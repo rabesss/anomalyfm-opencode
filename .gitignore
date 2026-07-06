@@ -4,3 +4,9 @@ ground-truth/
 node_modules/
 *.log
 backends/
+bun.lock
+
+scripts/live-smoke.ts
+results-verify-pause.csv
+
+scripts/smoke-load.ts

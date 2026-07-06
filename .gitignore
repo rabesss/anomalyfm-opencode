@@ -10,3 +10,5 @@ scripts/live-smoke.ts
 results-verify-pause.csv
 
 scripts/smoke-load.ts
+
+docs/superpowers/

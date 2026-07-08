@@ -41,13 +41,14 @@ import type { StreamPlayer } from "./player.ts";
 const ID = "anomalyfm";
 
 /**
- * Left indent (columns) for the statusline. Aligns the line with opencode's chat
- * input box content padding rather than the terminal's col 0, so the statusline
- * reads as part of the same UI system as the chat area instead of a stray strip
- * hugging the left edge. Measured against opencode v1.17.13: the input box's
- * "Ask anything..." text starts at col 7; with no indent our line starts at col 1.
+ * Left indent (columns) for the statusline. Aligns the ◆ with opencode's chat
+ * input box BORDER (the ┃/╹ vertical at col 4), not the content inside it
+ * ("Ask anything..." at col 7) — the border is the box's true left edge, and
+ * the statusline reads as part of the same panel system when it sits under it.
+ * Measured against opencode v1.17.13: box border at col 4, content at col 7,
+ * core footer ~/project at col 3. A 3-space indent lands the bullet at col 4.
  */
-const INDENT_COLS = 6;
+const INDENT_COLS = 3;
 
 /**
  * Pick the audio backend: mpv if its binary is on PATH (detected eagerly inside

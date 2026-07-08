@@ -18,7 +18,6 @@
  */
 
 import { createSignal } from "solid-js";
-import { t, fg } from "@opentui/core";
 
 import { StatusPoller, type StatusSnapshot } from "./poller.ts";
 import { RadioController, type ControllerState } from "./controller.ts";
@@ -94,15 +93,24 @@ const plugin: TuiPluginModule = {
     //
     // Coloring: renderLine returns a flat string, but its shape is guaranteed —
     // first char is always `◆`, last two are always ` ` + glyph (see truncate).
-    // We exploit that to paint three colored chunks via the typed styled-text
-    // API (`t` template tag + `fg()` colorizer from @opentui/core): the bullet
-    // (accent only when ON AIR, else muted), the body (always muted), and the
-    // glyph (warning on ERROR/UNSUPPORTED, else muted). Colors come from
-    // api.theme.current (live RGBA per the user's selected theme — no hardcoded
-    // hex), read lazily inside the render so a theme switch is picked up on the
-    // next poll/state change. Left-aligned: a status bar belongs at the left
-    // edge; wrapping in a <box justifyContent="flex-end"> would float it off
-    // into empty space on a wide terminal.
+    // We exploit that to paint three colored chunks via nested <span> children
+    // inside one <text>: the bullet (accent only when ON AIR, else muted), the
+    // body (always muted), and the glyph (warning on ERROR/UNSUPPORTED, else
+    // muted). Colors come from api.theme.current (live RGBA per the user's
+    // selected theme — no hardcoded hex), read lazily inside the render so a
+    // theme switch is picked up on the next poll/state change. Left-aligned: a
+    // status bar belongs at the left edge; wrapping in a
+    // <box justifyContent="flex-end"> would float it off into empty space.
+    //
+    // IMPLEMENTATION NOTE: the color MUST go via `style={{ fg }}`, not a bare
+    // `fg={...}` prop. The @opentui/solid reconciler silently drops `fg` on a
+    // <span> (isTextNodeRenderable early-return) and `SpanProps`'s TS type
+    // doesn't enumerate it either — but the `style` handler runs the span's
+    // fg through parseColor and renders correctly. Don't "simplify" this to
+    // <span fg={...}>; it will both fail tsc and render uncolored at runtime.
+    // And never use <text content={StyledText}>: the reconciler's `content`
+    // case coerces via template string, and StyledText has no toString(), so
+    // it renders the literal "[object Object]".
     api.slots.register({
       order: 1000,
       slots: {
@@ -112,14 +120,12 @@ const plugin: TuiPluginModule = {
           const line = renderLine(snap, state, width());
           const cur = api.theme.current;
           const resolve = (tok: StatusToken) => cur[tok];
-          // Build one StyledText with three differently-colored chunks. `fg()`
-          // takes a Color (RGBA | hex | css-name) and returns a chunk colorizer;
-          // cur.<token> is an RGBA, so this stays fully theme-driven.
-          const bullet = fg(resolve(bulletToken(snap)));
-          const body = fg(cur.textMuted);
-          const glyph = fg(resolve(glyphToken(state)));
           return (
-            <text content={t`${bullet(line[0])}${body(line.slice(1, -1))}${glyph(line[line.length - 1])}`} />
+            <text>
+              <span style={{ fg: resolve(bulletToken(snap)) }}>{line[0]}</span>
+              <span style={{ fg: cur.textMuted }}>{line.slice(1, -1)}</span>
+              <span style={{ fg: resolve(glyphToken(state)) }}>{line[line.length - 1]}</span>
+            </text>
           );
         },
       },

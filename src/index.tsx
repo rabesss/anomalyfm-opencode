@@ -41,6 +41,15 @@ import type { StreamPlayer } from "./player.ts";
 const ID = "anomalyfm";
 
 /**
+ * Left indent (columns) for the statusline. Aligns the line with opencode's chat
+ * input box content padding rather than the terminal's col 0, so the statusline
+ * reads as part of the same UI system as the chat area instead of a stray strip
+ * hugging the left edge. Measured against opencode v1.17.13: the input box's
+ * "Ask anything..." text starts at col 7; with no indent our line starts at col 1.
+ */
+const INDENT_COLS = 6;
+
+/**
  * Pick the audio backend: mpv if its binary is on PATH (detected eagerly inside
  * the constructor), otherwise the statusline-only no-op player. Constructing
  * MpvStreamPlayer never throws — the UNSUPPORTED state is set internally — but
@@ -117,11 +126,20 @@ const plugin: TuiPluginModule = {
         app_bottom: () => {
           const snap = getSnapshot()?.status ?? null;
           const state = getControllerState();
-          const line = renderLine(snap, state, width());
+          // Left-indent the statusline so it aligns with opencode's chat input
+          // box content (the rounded-border padding), not the terminal's col 0.
+          // Measured: the input box's "Ask anything..." text starts at col 7;
+          // our raw line renders at col 1, so a 6-space indent lands us under
+          // it. The indent is subtracted from renderLine's width budget so the
+          // truncation invariant (preserve bullet + trailing glyph) still holds
+          // and the line never overflows on a narrow terminal.
+          const line = renderLine(snap, state, width() - INDENT_COLS);
           const cur = api.theme.current;
           const resolve = (tok: StatusToken) => cur[tok];
+          const indent = " ".repeat(INDENT_COLS);
           return (
             <text>
+              <span style={{ fg: cur.textMuted }}>{indent}</span>
               <span style={{ fg: resolve(bulletToken(snap)) }}>{line[0]}</span>
               <span style={{ fg: cur.textMuted }}>{line.slice(1, -1)}</span>
               <span style={{ fg: resolve(glyphToken(state)) }}>{line[line.length - 1]}</span>

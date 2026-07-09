@@ -2,9 +2,9 @@
 
 An [opencode](https://opencode.ai) TUI plugin that tunes in to [anomaly.fm](https://anomaly.fm) — a statusline showing who's on air, plus audio playback through `mpv`.
 
-```
-◆ anomaly.fm · ON AIR · ryan · 12 live · ▶
-```
+![Statusline — ON AIR, playing](docs/assets/statusline-on-air.png)
+
+<p align="center"><img src="docs/assets/statusline-detail.png" alt="◆ anomaly.fm · ON AIR · ryan · 12 live · ▶" width="720" /></p>
 
 ## What it does
 
@@ -61,6 +61,14 @@ Update by fetching tags and checking out a newer release (a tag checkout is a de
 ## Trigger playback
 
 Open the command palette with **`Ctrl+P`**, search **"anomaly"**, and select **Play / pause** to tune in. Select it again to pause. The statusline glyph flips `⏸ → ▶` while playing and `▶ → ⏸` when paused.
+
+![Command palette — Play / pause](docs/assets/controls-play-pause.png)
+
+<p align="center"><img src="docs/assets/controls-detail.png" alt="Ctrl+P → anomaly → Play / pause" width="480" /></p>
+
+Dark theme, same statusline while playing:
+
+![Statusline — dark theme, playing](docs/assets/statusline-playing-dark.png)
 
 The plugin only adds a palette entry — it doesn't rebind or remove any of your existing shortcuts. opencode's `tui.json` `keybinds` schema accepts only built-in action names, so a direct chord isn't possible from config; a dedicated keybinding would require a `bindings` entry in the plugin's own keymap layer.
 

@@ -111,8 +111,8 @@ test("play() spawns mpv with the documented args (incl. --no-terminal)", async (
   expect(args).toContain("--no-video");
   expect(args).toContain("--profile=low-latency");
   expect(args.some((a) => a.startsWith("--stream-lavf-o=reconnect="))).toBe(true);
-  expect(args).toContain("--network-timeout=3"); // false-PLAYING connect cap (review G)
-  expect(args).toContain("--ytdl=no"); // disables yt-dlp on_load_fail mask (review G)
+  expect(args).toContain("--network-timeout=3"); // false-PLAYING connect cap
+  expect(args).toContain("--ytdl=no"); // disables yt-dlp on_load_fail mask
   expect(args).toContain("--no-terminal"); // silences the A: progress spam
   expect(args).toContain("https://anomaly.fm/radio");
 
@@ -125,7 +125,7 @@ test("play() spawns mpv with the documented args (incl. --no-terminal)", async (
 });
 
 test("MPV_ARGS carries the false-PLAYING connect-cap + ytdl flags", () => {
-  // Regression guard for review G: against an unreachable-from-start stream,
+  // Regression guard: against an unreachable-from-start stream,
   // mpv blocks in connect() for ~120s, and its built-in ytdl_hook re-resolves
   // the URL via yt-dlp on load failure — both keep mpv "alive" past the 4s
   // settle window and fire a false PLAYING. --network-timeout=3 (< settle)
@@ -285,7 +285,7 @@ test("mpv exits AFTER the settle window (mid-playback) → ERROR", async () => {
 });
 
 test("post-settle exit watcher is inert after teardown", async () => {
-  // Regression guard for the dropped exitWatcherDispose (Finding C): after
+  // Regression guard for the dropped exitWatcherDispose: after
   // pause() tears the process down, a late proc.exited must NOT flip state
   // back to ERROR. The `this.proc === proc` identity guard is the protection.
   const proc = fakeMpvChild();

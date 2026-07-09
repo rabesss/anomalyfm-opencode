@@ -1,10 +1,6 @@
 /**
  * Statusline rendering — pure string helper.
  *
- * Task 3 scope: `renderLine` + `truncate` only. The `@opentui/solid`
- * component that paints this string into opencode's `app_bottom` slot arrives
- * in Task 4 (hence the `.tsx` extension, kept ready for JSX).
- *
  * `renderLine` is pure (no I/O, no globals): given a station snapshot, a
  * controller state, and a terminal width, produce the exact statusline string.
  * The producer copy rules are pinned by the snapshot tests in

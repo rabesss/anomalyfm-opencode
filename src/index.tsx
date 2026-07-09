@@ -5,11 +5,6 @@
  * StatusPoller → RadioController → MpvStreamPlayer (with a NoAudio fallback),
  * and disposes all of it via `api.lifecycle.onDispose`.
  *
- * This module is verified against the installed @opencode-ai/plugin@1.17.13
- * types (node_modules/@opencode-ai/plugin/dist/tui.d.ts) and the @opentui/solid
- * 0.4.3 JSX runtime — it must typecheck cleanly against those (see Task 4
- * report). It does NOT depend on actually loading inside opencode; that's Task 8.
- *
  * Re-render model: the slot render function runs inside a Solid reactive owner
  * (opencode's @opentui/solid reconciler sets up a root per slot). Reading the
  * `snapshot`/`controllerState` signal accessors inside the JSX establishes a
@@ -55,9 +50,6 @@ const INDENT_COLS = 3;
  * the constructor), otherwise the statusline-only no-op player. Constructing
  * MpvStreamPlayer never throws — the UNSUPPORTED state is set internally — but
  * the try/catch is belt-and-suspenders for any unexpected construction error.
- *
- * CORRECTION #2 vs. the brief: the real MpvStreamPlayer option is `url`
- * (src/mpv-player.ts:137), NOT `streamUrl`.
  */
 async function pickPlayer(streamUrl: string): Promise<StreamPlayer> {
   try {
@@ -97,9 +89,8 @@ const plugin: TuiPluginModule = {
     });
 
     // --- register the statusline slot (app_bottom, order 1000) ---
-    // CORRECTION #3 vs. the brief: TuiSlotPlugin is Omit<SolidPlugin,"id"> &
-    // { id?: never } (tui.d.ts:398-400), so the registration object must NOT
-    // carry an `id` — opencode assigns one internally and returns it.
+    // The registration object must NOT carry an `id` — TuiSlotPlugin is
+    // Omit<SolidPlugin,"id"> & { id?: never }; opencode assigns one internally.
     //
     // Coloring: renderLine returns a flat string, but its shape is guaranteed —
     // first char is always `◆`, last two are always ` ` + glyph (see truncate).

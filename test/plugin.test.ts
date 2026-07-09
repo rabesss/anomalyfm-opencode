@@ -14,9 +14,8 @@
  *
  * What this does NOT re-test:
  *   - `renderLine`'s exact string output — that's exhaustively pinned in
- *     test/statusline.test.ts (Task 3). The slot render returns a Solid JSX
- *     element, NOT a string (Task 4 report: option (b) — assert registration,
- *     not string format). Calling the render outside a Solid reactive owner
+ *     test/statusline.test.ts. The slot render returns a Solid JSX element,
+ *     NOT a string. Calling the render outside a Solid reactive owner
  *     raises "React is not defined" because Bun's runtime transpiler does not
  *     apply the `jsxImportSource` that the `@opentui/solid` runtime needs; we
  *     therefore assert the render is installed as a function and leave its
@@ -67,7 +66,7 @@ let savedFetch: typeof globalThis.fetch | null = null;
 let currentApi: ReturnType<typeof fakeTuiApi> | null = null;
 
 beforeEach(() => {
-  // Finding 1 fix: stub fetch for EVERY test, not just test 4. Without this,
+  // Stub fetch for EVERY test. Without this,
   // `mount()` → `tui()` → `poller.start()` → `pollOnce()` awaits the real
   // `globalThis.fetch` against https://anomaly.fm/feed/status.json, leaking a
   // real network GET (the error is swallowed by pollOnce's try/catch, so no
@@ -76,7 +75,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Finding 2 fix: dispose whatever the test mounted. `start()` fires the
+  // Dispose whatever the test mounted. `start()` fires the
   // first poll synchronously and arms a cadence timer (sequential setTimeout)
   // once it settles inside `flushMicrotasks`; without `poller.stop()` that
   // timer leaks across tests. `_runDispose()` runs the plugin's onDispose
@@ -126,7 +125,7 @@ function stubFetchToFail(): void {
  */
 async function mount() {
   const api = fakeTuiApi();
-  currentApi = api; // tracked so afterEach can dispose it (Finding 2)
+  currentApi = api; // tracked so afterEach can dispose it
   const tui = plugin.tui as (
     api: unknown,
     options: unknown,
@@ -172,7 +171,7 @@ test("slot render is installed as a function (registration, not string)", async 
 
 test("radio.toggle run drives the controller (no real mpv) and dispose is clean", async () => {
   stubBunWhichMissing(); // player → UNSUPPORTED at construction; toggle is a no-op
-  // fetch is stubbed by beforeEach (Finding 1) — no per-test call needed here.
+  // fetch is stubbed by beforeEach — no per-test call needed here.
 
   // Count stray rejections across the whole mount → toggle → dispose cycle.
   let unhandled = 0;

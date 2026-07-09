@@ -4,6 +4,9 @@ ground-truth/
 node_modules/
 *.log
 backends/
+# No lockfile: this is an opencode plugin resolved through the host's own
+# dependency tree, so a committed bun.lock would be noise rather than a
+# reproducibility contract. CI/dev installs resolve fresh each run.
 bun.lock
 
 scripts/live-smoke.ts

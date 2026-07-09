@@ -51,6 +51,11 @@ test("pollIntervalMs is floored at the minimum", () => {
   expect(resolveOptions({ pollIntervalMs: MIN_POLL_INTERVAL_MS }).pollIntervalMs).toBe(MIN_POLL_INTERVAL_MS);
 });
 
+test("non-positive pollIntervalMs falls back to default (treated as invalid)", () => {
+  expect(resolveOptions({ pollIntervalMs: 0 }).pollIntervalMs).toBe(DEFAULTS.pollIntervalMs);
+  expect(resolveOptions({ pollIntervalMs: -5 }).pollIntervalMs).toBe(DEFAULTS.pollIntervalMs);
+});
+
 test("a valid pollIntervalMs above the floor passes through", () => {
   expect(resolveOptions({ pollIntervalMs: 5000 }).pollIntervalMs).toBe(5000);
 });

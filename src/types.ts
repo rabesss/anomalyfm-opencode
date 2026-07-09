@@ -43,7 +43,7 @@ export interface StationStatus {
 /** Minimal fetch type (global fetch fits). Injectable for tests. */
 export type FetchLike = (
   input: string,
-  init?: { cache?: string; headers?: Record<string, string> },
+  init?: { cache?: string; headers?: Record<string, string>; signal?: AbortSignal },
 ) => Promise<{
   ok: boolean;
   status: number;

@@ -31,7 +31,7 @@ export function resolveOptions(raw: unknown): PluginOptions & typeof DEFAULTS {
 }
 
 function clampPollInterval(v: unknown, dflt: number): number {
-  if (typeof v !== "number" || !Number.isFinite(v)) return dflt;
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return dflt;
   return Math.max(MIN_POLL_INTERVAL_MS, Math.floor(v));
 }
 

@@ -27,8 +27,14 @@ import type { ControllerState } from "./controller.ts";
  */
 export type StatusToken = "accent" | "warning" | "textMuted";
 
-/** Trailing glyph per controller state. CONNECTING shares PAUSED's ⏸. */
-const GLYPH: Record<ControllerState, string> = {
+/**
+ * Trailing glyph per controller state. CONNECTING shares PAUSED's ⏸. INVARIANT:
+ * every value MUST be a BMP character (a single UTF-16 code unit) — truncate()
+ * slices the trailing " "+glyph by code unit (slice(-2)) and index.tsx indexes
+ * line[line.length-1], both of which would split a supplementary/astral glyph.
+ * Adding an emoji here requires making the whole render path code-point-aware.
+ */
+export const GLYPH: Record<ControllerState, string> = {
   PAUSED: "⏸",
   CONNECTING: "⏸",
   PLAYING: "▶",

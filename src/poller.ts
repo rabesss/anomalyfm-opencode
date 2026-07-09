@@ -23,6 +23,13 @@ import {
 
 export const POLL_INTERVAL_MS = 15_000;
 export const STALE_AFTER_MS = 60_000;
+/**
+ * Per-poll fetch timeout. Bounds the status + Icecast fetches so a hung
+ * connection (open socket, no response) can't stall the sequential cadence —
+ * the next poll arms only in the current poll's `.finally`, so without this a
+ * never-settling fetch would freeze polling forever. Kept < POLL_INTERVAL_MS.
+ */
+export const FETCH_TIMEOUT_MS = 10_000;
 const STATUS_URL = "https://anomaly.fm/feed/status.json";
 const ICECAST_URL = "https://anomaly.fm/status-json.xsl";
 
@@ -139,8 +146,9 @@ export class StatusPoller {
 
   /** Poll once now, regardless of cadence. Used by tests. */
   async pollOnce(): Promise<void> {
+    const { signal, cancel } = this.armFetchTimeout();
     try {
-      const res = await this.fetchImpl(this.statusUrl, { cache: "no-store" });
+      const res = await this.fetchImpl(this.statusUrl, { cache: "no-store", signal });
       if (!res.ok) {
         if (!this.loggedHttp) {
           this.loggedHttp = true;
@@ -155,7 +163,7 @@ export class StatusPoller {
       // Listener fallback: only when status.json says unknown.
       let listeners = status.listeners;
       if (listeners === null) {
-        listeners = await this.icecastListenersWithLogging();
+        listeners = await this.icecastListenersWithLogging(signal);
       }
 
       const ageMs = this.ageMs(status.updated);
@@ -174,12 +182,16 @@ export class StatusPoller {
       };
       this.publish();
     } catch (err) {
-      // Network / DNS / connection reset. Keep last-known; log once.
+      // Network / DNS / connection reset / fetch-timeout abort. Keep
+      // last-known; log once. The abort is what lets a hung connection settle
+      // so the sequential cadence can arm its next poll.
       if (!this.loggedNet) {
         this.loggedNet = true;
         this.log("warn", `status.json fetch failed (${describe(err)}); keeping last-known`);
       }
       this.publish();
+    } finally {
+      cancel();
     }
   }
 
@@ -190,9 +202,20 @@ export class StatusPoller {
 
   /* ---------- internals ---------- */
 
-  private async icecastListenersWithLogging(): Promise<number | null> {
+  /**
+   * Abort this poll's fetches after FETCH_TIMEOUT_MS so a hung connection (open
+   * socket, never responding) can't stall the sequential cadence. Returns a
+   * dispose fn that clears the timeout — call it in pollOnce's `finally`.
+   */
+  private armFetchTimeout(): { signal: AbortSignal; cancel: () => void } {
+    const controller = new AbortController();
+    const cancel = this._setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    return { signal: controller.signal, cancel };
+  }
+
+  private async icecastListenersWithLogging(signal: AbortSignal): Promise<number | null> {
     try {
-      const res = await this.fetchImpl(this.icecastUrl, { cache: "no-store" });
+      const res = await this.fetchImpl(this.icecastUrl, { cache: "no-store", signal });
       if (!res.ok) return null;
       const parsed = await res.json();
       return icecastListeners(parsed);

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { renderLine, bulletToken, glyphToken } from "../src/statusline.tsx";
+import { renderLine, bulletToken, glyphToken, GLYPH } from "../src/statusline.tsx";
 import type { StationStatus } from "../src/types.ts";
 import type { ControllerState } from "../src/controller.ts";
 
@@ -130,4 +130,14 @@ test("glyphToken: ERROR and UNSUPPORTED → warning", () => {
 test("glyphToken: healthy states → muted", () => {
   const healthy: ControllerState[] = ["PLAYING", "PAUSED", "CONNECTING"];
   for (const s of healthy) expect(glyphToken(s)).toBe("textMuted");
+});
+
+test("every glyph is a single BMP code unit (truncate/index code-unit safety)", () => {
+  // Guards the GLYPH invariant: truncate() slices the trailing " "+glyph by
+  // code unit (slice(-2)) and index.tsx indexes line[line.length-1], so an
+  // astral/emoji glyph would split a surrogate pair. If this fails, make the
+  // whole render path code-point-aware rather than just widening the glyph.
+  for (const g of Object.values(GLYPH)) {
+    expect(g.length).toBe(1); // one UTF-16 code unit == BMP
+  }
 });

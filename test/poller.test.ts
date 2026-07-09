@@ -1,7 +1,9 @@
 import { expect, test, describe } from "bun:test";
-import { StatusPoller, STALE_AFTER_MS, type StatusSnapshot } from "../src/poller.ts";
+import { StatusPoller, STALE_AFTER_MS, FETCH_TIMEOUT_MS, type StatusSnapshot } from "../src/poller.ts";
 import type { FetchLike } from "../src/types.ts";
 import { makeFetch, freshStatus } from "./helpers.ts";
+
+type FetchResult = { ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> };
 
 const STATUS = "https://anomaly.fm/feed/status.json";
 const ICE = "https://anomaly.fm/status-json.xsl";
@@ -248,8 +250,7 @@ describe("StatusPoller", () => {
     // .finally, so stop() before the first poll resolved was a no-op and the
     // timer leaked once the poll settled.
     const clock = new FakeClock();
-    let release!: () => void;
-    const held = new Promise<void>((r) => (release = r));
+    const { promise: held, resolve: release } = Promise.withResolvers<void>();
     const calls: string[] = [];
     const fetch: FetchLike = async (input) => {
       calls.push(input);
@@ -259,7 +260,7 @@ describe("StatusPoller", () => {
     const poller = new StatusPoller({ fetch, pollIntervalMs: 25, now: clock.now, setTimeout: clock.setTimeout });
     poller.start();
     expect(calls.length).toBe(1); // first GET fires immediately
-    expect(clock.pendingCount()).toBe(0); // timer arms only after the poll settles
+    expect(clock.pendingCount()).toBe(1); // the per-poll fetch-timeout is armed while the poll is pending
     poller.stop(); // before the first poll resolves
     release();
     await poller.idle();
@@ -268,8 +269,7 @@ describe("StatusPoller", () => {
 
   test("cadence never overlaps: a pending poll blocks the next until it settles", async () => {
     const clock = new FakeClock();
-    let release!: () => void;
-    const held = new Promise<void>((r) => (release = r));
+    const { promise: held, resolve: release } = Promise.withResolvers<void>();
     let first = true;
     let active = 0;
     let maxActive = 0;
@@ -309,8 +309,7 @@ describe("StatusPoller", () => {
     // handle overwrites the live one. Asserting exactly one timer after the
     // stale poll settles pins the guard.
     const clock = new FakeClock();
-    let releaseFirst!: () => void;
-    const held = new Promise<void>((r) => (releaseFirst = r));
+    const { promise: held, resolve: releaseFirst } = Promise.withResolvers<void>();
     let first = true;
     const calls: string[] = [];
     const fetch: FetchLike = async (input) => {
@@ -326,13 +325,72 @@ describe("StatusPoller", () => {
     expect(calls.length).toBe(1);
     poller.stop();
     poller.start(); // gen 2: second poll fires + resolves
-    await flush(); // let gen-2 poll settle → arms gen-2 timer
+    await flush(); // let gen-2 poll settle → arms gen-2 cadence
     expect(calls.length).toBe(2);
-    expect(clock.pendingCount()).toBe(1);
+    // T1 (gen-1's held-poll fetch-timeout, still armed) + C2 (gen-2 cadence).
+    expect(clock.pendingCount()).toBe(2);
     releaseFirst(); // gen-1 poll settles; its .finally must NOT arm a second timer
     await flush();
     expect(clock.pendingCount()).toBe(1); // still one — stale .finally was a no-op
     poller.stop();
     expect(clock.pendingCount()).toBe(0);
+  });
+
+  test("a hung status fetch is aborted so the cadence recovers", async () => {
+    // Regression: the sequential cadence arms the next poll only in the
+    // current poll's .finally, so a fetch that NEVER settles would freeze
+    // polling forever. The per-poll fetch-timeout aborts it → poll settles →
+    // cadence recovers.
+    const clock = new FakeClock();
+    let aborted = false;
+    const fetch: FetchLike = (_input, init) => {
+      const { promise, reject } = Promise.withResolvers<FetchResult>();
+      init?.signal?.addEventListener("abort", () => {
+        aborted = true;
+        reject(new DOMException("aborted", "AbortError"));
+      });
+      return promise;
+    };
+    const poller = new StatusPoller({ fetch, pollIntervalMs: 25, now: clock.now, setTimeout: clock.setTimeout });
+    poller.start(); // status fetch hangs; only the fetch-timeout timer is armed
+    expect(clock.pendingCount()).toBe(1);
+    clock.advance(FETCH_TIMEOUT_MS + 1); // abort fires → poll settles → cadence arms
+    await flush();
+    expect(aborted).toBe(true);
+    expect(clock.pendingCount()).toBe(1); // cadence recovered (the aborted poll's timeout was cancelled in finally)
+    poller.stop();
+  });
+
+  test("a hung Icecast fallback fetch is aborted (signal wired to the fallback)", async () => {
+    // Proves the abort signal reaches the FALLBACK fetch, not just the status
+    // one: status.json resolves with listeners:null → icecastListenersWithLogging
+    // hangs → the shared signal aborts it.
+    const clock = new FakeClock();
+    let iceAborted = false;
+    const fetch: FetchLike = (input, init) => {
+      if (input === STATUS) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => freshStatus({ listeners: null }),
+          text: async () => "",
+        });
+      }
+      const { promise, reject } = Promise.withResolvers<FetchResult>();
+      init?.signal?.addEventListener("abort", () => {
+        iceAborted = true;
+        reject(new DOMException("aborted", "AbortError"));
+      });
+      return promise;
+    };
+    const poller = new StatusPoller({ fetch, pollIntervalMs: 25, now: clock.now, setTimeout: clock.setTimeout });
+    poller.start();
+    await flush(); // status.json resolves → fallback hangs
+    expect(iceAborted).toBe(false);
+    clock.advance(FETCH_TIMEOUT_MS + 1); // shared signal aborts the fallback
+    await flush();
+    expect(iceAborted).toBe(true);
+    expect(clock.pendingCount()).toBe(1); // cadence recovered
+    poller.stop();
   });
 });

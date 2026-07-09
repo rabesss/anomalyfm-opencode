@@ -10,11 +10,15 @@
  * - Retry: when a tune-in lands in ERROR (a real player's fetch failed), we
  *   back off and retry, matching radio-core.js's `min(3000*attempts, 15000)`.
  *   A pause() always cancels the pending retry.
- * - Watchdog: a 15s-no-progress timer (radio-core.js:174-180) that, for a
- *   real player, would force-reconnect. Here it is a no-op safety net: the
- *   no-audio player never enters PLAYING so it never arms.
+ * - Reconnect: there is NO in-process watchdog. mpv owns network reconnect
+ *   (--stream-lavf-o=reconnect=1,...) for transient drops, and the
+ *   StreamPlayer contract reports state by liveness with no progress feed,
+ *   so a timestamp-based watchdog would misfire on healthy playback. A
+ *   mid-playback mpv exit flips the player's OWN state to ERROR, but the
+ *   controller has no error callback to observe that — recovery today is
+ *   mpv's native reconnect; an observable onState path is a known gap.
  *
- * Injectable clock + player for deterministic tests.
+ * Injectable timer + player for deterministic tests.
  */
 
 import type { PlayerState, StreamPlayer } from "./player.ts";
@@ -24,20 +28,15 @@ export type ControllerState = PlayerState;
 export interface RadioControllerOptions {
   /** default: real setTimeout/clearTimeout. Override in tests. */
   setTimeout?: (fn: () => void, ms: number) => () => void;
-  now?: () => number;
   /** default max backoff; matches radio-core.js. */
   maxBackoffMs?: number;
   /** called on every state transition. */
   onState?: (s: ControllerState, error?: string) => void;
 }
 
-const WATCHDOG_INTERVAL_MS = 5_000;
-const STALL_THRESHOLD_MS = 15_000;
-
 export class RadioController {
   private readonly player: StreamPlayer;
   private readonly _setTimeout: (fn: () => void, ms: number) => () => void;
-  private readonly now: () => number;
   private readonly maxBackoffMs: number;
   private readonly onState?: (s: ControllerState, error?: string) => void;
 
@@ -45,13 +44,10 @@ export class RadioController {
   private wantPlaying = false;
   private retryTicket: (() => void) | null = null; // dispose fn for pending retry
   private attempts = 0;
-  private lastProgress = 0;
-  private watchdogTimer: (() => void) | null = null;
 
   constructor(player: StreamPlayer, opts: RadioControllerOptions = {}) {
     this.player = player;
     this._setTimeout = opts.setTimeout ?? ((fn, ms) => realTimer(fn, ms));
-    this.now = opts.now ?? Date.now;
     this.maxBackoffMs = opts.maxBackoffMs ?? 15_000;
     this.onState = opts.onState;
   }
@@ -73,17 +69,14 @@ export class RadioController {
   async start(): Promise<void> {
     this.wantPlaying = true;
     this.attempts = 0;
-    this.lastProgress = this.now();
     this.setState("CONNECTING");
     await this.invokePlay();
-    this.ensureWatchdog();
   }
 
-  /** Explicit tune-out. Cancels retry + watchdog. */
+  /** Explicit tune-out. Cancels the pending retry. */
   stop(): void {
     this.wantPlaying = false;
     this.cancelRetry();
-    this.cancelWatchdog();
     try {
       this.player.pause();
     } catch {
@@ -106,7 +99,6 @@ export class RadioController {
       const next = this.player.state;
       if (next === "PLAYING") {
         this.attempts = 0;
-        this.lastProgress = this.now();
       }
       this.setState(next, this.player.error);
       // If the real player errored, schedule a retry (radio-core.js pattern).
@@ -140,28 +132,6 @@ export class RadioController {
       this.retryTicket = null;
     }
     this.attempts = 0;
-  }
-
-  private ensureWatchdog(): void {
-    if (this.watchdogTimer !== null) return;
-    this.watchdogTimer = this._setTimeout(() => {
-      // Radio-core.js:174-180 — if no progress for 15s while wanting play,
-      // force a reconnect. For the no-audio player this is a no-op (never
-      // PLAYING → lastProgress never advances past CONNECTING's set), but it
-      // is the contract every real backend relies on.
-      if (!this.wantPlaying) return;
-      const stalledFor = this.now() - this.lastProgress;
-      if (stalledFor > STALL_THRESHOLD_MS && this.retryTicket === null) {
-        this.scheduleRetry();
-      }
-    }, WATCHDOG_INTERVAL_MS);
-  }
-
-  private cancelWatchdog(): void {
-    if (this.watchdogTimer !== null) {
-      this.watchdogTimer();
-      this.watchdogTimer = null;
-    }
   }
 
   private setState(s: ControllerState, error?: string): void {

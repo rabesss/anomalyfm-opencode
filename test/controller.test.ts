@@ -108,7 +108,6 @@ describe("RadioController — FSM transitions", () => {
     const states: PlayerState[] = [];
     const ctrl = new RadioController(player, {
       setTimeout: clock.setTimeout,
-      now: clock.now,
       onState: (s) => states.push(s),
     });
 
@@ -135,7 +134,6 @@ describe("RadioController — FSM transitions", () => {
     player.landOnPlay = "ERROR";
     const ctrl = new RadioController(player, {
       setTimeout: clock.setTimeout,
-      now: clock.now,
       maxBackoffMs: 15_000,
     });
     await ctrl.toggle(); // play #1 at t=0, then arms 1st retry at +3s
@@ -165,7 +163,6 @@ describe("RadioController — FSM transitions", () => {
     player.landOnPlay = "ERROR";
     const ctrl = new RadioController(player, {
       setTimeout: clock.setTimeout,
-      now: clock.now,
     });
     await ctrl.toggle();
     // After an ERROR land, scheduleRetry immediately moves us to CONNECTING
@@ -187,7 +184,7 @@ describe("RadioController — FSM transitions", () => {
     const clock = new FakeClock();
     const player = new FakePlayer();
     player.landOnPlay = "ERROR";
-    const ctrl = new RadioController(player, { setTimeout: clock.setTimeout, now: clock.now });
+    const ctrl = new RadioController(player, { setTimeout: clock.setTimeout });
     await ctrl.toggle();
     expect(clock.pendingCount()).toBeGreaterThan(0);
     ctrl.dispose();
@@ -202,5 +199,22 @@ describe("RadioController — FSM transitions", () => {
     expect(ctrl.state).toBe("PLAYING");
     ctrl.stop();
     expect(ctrl.state).toBe("PAUSED");
+  });
+
+  test("healthy PLAYING schedules no spurious retries (no watchdog)", async () => {
+    // Guards the watchdog removal: a timestamp-based watchdog with no progress
+    // feed would force a reconnect ~15s into healthy playback. There is none.
+    const clock = new FakeClock();
+    const player = new FakePlayer();
+    player.landOnPlay = "PLAYING";
+    const ctrl = new RadioController(player, { setTimeout: clock.setTimeout });
+    await ctrl.toggle();
+    expect(player.playCalls).toBe(1);
+    // Advance well past the former 15s stall threshold; nothing should fire.
+    clock.advance(60_000);
+    await flush();
+    expect(player.playCalls).toBe(1); // no reconnect attempt
+    expect(clock.pendingCount()).toBe(0); // no timers armed during PLAYING
+    ctrl.stop();
   });
 });

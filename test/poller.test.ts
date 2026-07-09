@@ -1,9 +1,45 @@
 import { expect, test, describe } from "bun:test";
 import { StatusPoller, STALE_AFTER_MS, type StatusSnapshot } from "../src/poller.ts";
+import type { FetchLike } from "../src/types.ts";
 import { makeFetch, freshStatus } from "./helpers.ts";
 
 const STATUS = "https://anomaly.fm/feed/status.json";
 const ICE = "https://anomaly.fm/status-json.xsl";
+
+/** A fake clock: setTimeout queues fns keyed by deadline; advance runs them. */
+class FakeClock {
+  private t = 0;
+  private queue: { deadline: number; fn: () => void; alive: boolean }[] = [];
+  now = () => this.t;
+  setTimeout = (fn: () => void, ms: number) => {
+    const entry = { deadline: this.t + ms, fn, alive: true };
+    this.queue.push(entry);
+    return () => {
+      entry.alive = false;
+    };
+  };
+  advance(ms: number): void {
+    const target = this.t + ms;
+    for (;;) {
+      const due = this.queue.filter((e) => e.alive && e.deadline <= target);
+      if (due.length === 0) break;
+      due.sort((a, b) => a.deadline - b.deadline);
+      const next = due[0]!;
+      this.t = next.deadline;
+      next.alive = false;
+      next.fn();
+    }
+    this.t = target;
+  }
+  pendingCount(): number {
+    return this.queue.filter((e) => e.alive).length;
+  }
+}
+
+/** Drain the microtask queue so an un-awaited pollOnce()/finally can settle. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+}
 
 describe("StatusPoller", () => {
   test("happy path — first GET publishes immediately, never throws", async () => {
@@ -205,5 +241,98 @@ describe("StatusPoller", () => {
     await poller.idle(); // first poll resolves
     expect(fetch.calls[STATUS]).toBeGreaterThanOrEqual(1);
     poller.stop();
+  });
+
+  test("stop() during the first poll arms no cadence timer after it settles", async () => {
+    // Regression: the cadence timer used to be armed unconditionally inside
+    // .finally, so stop() before the first poll resolved was a no-op and the
+    // timer leaked once the poll settled.
+    const clock = new FakeClock();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const calls: string[] = [];
+    const fetch: FetchLike = async (input) => {
+      calls.push(input);
+      await held;
+      return { ok: true, status: 200, json: async () => freshStatus({ listeners: 1 }), text: async () => "" };
+    };
+    const poller = new StatusPoller({ fetch, pollIntervalMs: 25, now: clock.now, setTimeout: clock.setTimeout });
+    poller.start();
+    expect(calls.length).toBe(1); // first GET fires immediately
+    expect(clock.pendingCount()).toBe(0); // timer arms only after the poll settles
+    poller.stop(); // before the first poll resolves
+    release();
+    await poller.idle();
+    expect(clock.pendingCount()).toBe(0); // stale .finally armed nothing
+  });
+
+  test("cadence never overlaps: a pending poll blocks the next until it settles", async () => {
+    const clock = new FakeClock();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let first = true;
+    let active = 0;
+    let maxActive = 0;
+    const calls: string[] = [];
+    const fetch: FetchLike = async (input) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      calls.push(input);
+      if (first) {
+        first = false;
+        await held;
+      }
+      active -= 1;
+      return { ok: true, status: 200, json: async () => freshStatus({ listeners: 1 }), text: async () => "" };
+    };
+    const poller = new StatusPoller({ fetch, pollIntervalMs: 25, now: clock.now, setTimeout: clock.setTimeout });
+    poller.start();
+    expect(calls.length).toBe(1); // first poll pending (held)
+    // Advancing past the cadence while the first poll is still pending must NOT
+    // start a second poll: the sequential loop arms the next timer only after
+    // the current poll settles, so there is no timer to fire here.
+    clock.advance(100);
+    expect(calls.length).toBe(1);
+    expect(maxActive).toBe(1);
+    release();
+    await poller.idle(); // first poll settles → arms the cadence timer
+    expect(clock.pendingCount()).toBe(1);
+    clock.advance(25); // cadence fires → second poll
+    await flush();
+    expect(calls.length).toBe(2);
+    poller.stop();
+  });
+
+  test("start→stop→start during a pending poll arms exactly one cadence", async () => {
+    // Regression: without a generation guard, the stale first poll's .finally
+    // sees running===true (from the new run) and arms a SECOND timer whose
+    // handle overwrites the live one. Asserting exactly one timer after the
+    // stale poll settles pins the guard.
+    const clock = new FakeClock();
+    let releaseFirst!: () => void;
+    const held = new Promise<void>((r) => (releaseFirst = r));
+    let first = true;
+    const calls: string[] = [];
+    const fetch: FetchLike = async (input) => {
+      calls.push(input);
+      if (first) {
+        first = false;
+        await held;
+      }
+      return { ok: true, status: 200, json: async () => freshStatus({ listeners: 1 }), text: async () => "" };
+    };
+    const poller = new StatusPoller({ fetch, pollIntervalMs: 25, now: clock.now, setTimeout: clock.setTimeout });
+    poller.start(); // gen 1: first poll held open
+    expect(calls.length).toBe(1);
+    poller.stop();
+    poller.start(); // gen 2: second poll fires + resolves
+    await flush(); // let gen-2 poll settle → arms gen-2 timer
+    expect(calls.length).toBe(2);
+    expect(clock.pendingCount()).toBe(1);
+    releaseFirst(); // gen-1 poll settles; its .finally must NOT arm a second timer
+    await flush();
+    expect(clock.pendingCount()).toBe(1); // still one — stale .finally was a no-op
+    poller.stop();
+    expect(clock.pendingCount()).toBe(0);
   });
 });

@@ -44,11 +44,11 @@ const FAKE_META = { id: "anomalyfm" } as unknown as Parameters<
 >[2];
 
 /**
- * Flush the microtask queue enough times for `StatusPoller.start()`'s
- * `.finally(() => armInterval)` callback to run, so the cadence interval is
- * armed (and thus cleared) deterministically before dispose. The poller's first
- * GET is fired synchronously inside `start()` and its `.finally` arms the
- * `setInterval`; we need a few microtask ticks to let that settle.
+ * Flush the microtask queue enough times for `StatusPoller.start()`'s first
+ * poll to settle, so its `.finally` arms the cadence timer (a sequential
+ * setTimeout loop, not setInterval) and is thus cleared deterministically
+ * before dispose. The poller's first GET is fired synchronously inside
+ * `start()`; we need a few microtask ticks to let it resolve.
  */
 function flushMicrotasks(): Promise<void> {
   return Promise.resolve().then().then().then().then();
@@ -60,8 +60,8 @@ let savedFetch: typeof globalThis.fetch | null = null;
 
 /**
  * The fake api returned by the most recent `mount()`, tracked so `afterEach`
- * can dispose it (clearing the poller's 15s cadence interval + the controller's
- * retry/watchdog timers) even if a test forgets to. Every mount has a matching
+ * can dispose it (clearing the poller's cadence timer + the controller's
+ * pending retry) even if a test forgets to. Every mount has a matching
  * dispose, no matter which test runs.
  */
 let currentApi: ReturnType<typeof fakeTuiApi> | null = null;
@@ -76,10 +76,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Finding 2 fix: dispose whatever the test mounted. `start()`'s
-  // `.finally(armInterval)` arms a 15s cadence interval once the (now stubbed)
-  // fetch settles inside `flushMicrotasks`; without `poller.stop()` that
-  // interval leaks across tests. `_runDispose()` runs the plugin's onDispose
+  // Finding 2 fix: dispose whatever the test mounted. `start()` fires the
+  // first poll synchronously and arms a cadence timer (sequential setTimeout)
+  // once it settles inside `flushMicrotasks`; without `poller.stop()` that
+  // timer leaks across tests. `_runDispose()` runs the plugin's onDispose
   // chain (keymap disposer + controller.dispose + poller.stop) and is
   // idempotent, so a test that already disposed (test 4) is harmless.
   currentApi?._runDispose();

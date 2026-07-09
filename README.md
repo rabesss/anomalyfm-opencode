@@ -31,9 +31,9 @@ Not published to npm — install a pinned release straight from GitHub. `opencod
 
 ```bash
 # user-wide (global config):
-opencode plugin -g github:rabesss/anomalyfm-opencode#v0.2.0
+opencode plugin -g github:rabesss/anomalyfm-opencode#v0.2.1
 # per-project (.opencode/tui.json):
-opencode plugin    github:rabesss/anomalyfm-opencode#v0.2.0
+opencode plugin    github:rabesss/anomalyfm-opencode#v0.2.1
 ```
 
 Pin to a tag so a checkout never tracks moving `master`. To move to a later release, change the tag and re-run.
@@ -44,7 +44,7 @@ Pin to a tag so a checkout never tracks moving `master`. To move to a later rele
 If you'd rather not use the installer, clone the release and point `tui.json` at the directory with an absolute path or `file://` URL (opencode does no `~` expansion):
 
 ```bash
-git clone --branch v0.2.0 https://github.com/rabesss/anomalyfm-opencode /home/you/src/anomalyfm-opencode
+git clone --branch v0.2.1 https://github.com/rabesss/anomalyfm-opencode /home/you/src/anomalyfm-opencode
 ```
 
 ```jsonc
@@ -54,13 +54,13 @@ git clone --branch v0.2.0 https://github.com/rabesss/anomalyfm-opencode /home/yo
 }
 ```
 
-Update by fetching tags and checking out a newer release (a tag checkout is a detached HEAD, so plain `git pull` won't move it): `git fetch --tags && git checkout v0.2.1`.
+Update by fetching tags and checking out a newer release (a tag checkout is a detached HEAD, so plain `git pull` won't move it): `git fetch --tags && git checkout v0.2.2`.
 
 </details>
 
 ## Trigger playback
 
-Open the command palette with **`Ctrl+P`**, search **"anomaly"**, and select **anomaly.fm: toggle playback** to tune in. Select it again to pause. The statusline glyph flips `⏸ → ▶` while playing and `▶ → ⏸` when paused.
+Open the command palette with **`Ctrl+P`**, search **"anomaly"**, and select **Play / pause** to tune in. Select it again to pause. The statusline glyph flips `⏸ → ▶` while playing and `▶ → ⏸` when paused.
 
 The plugin only adds a palette entry — it doesn't rebind or remove any of your existing shortcuts. opencode's `tui.json` `keybinds` schema accepts only built-in action names, so a direct chord isn't possible from config; a dedicated keybinding would require a `bindings` entry in the plugin's own keymap layer.
 
@@ -70,7 +70,7 @@ Pass options as a `[spec, options]` tuple in `tui.json` — the `spec` must matc
 
 ```jsonc
 {
-  "plugin": [["github:rabesss/anomalyfm-opencode#v0.2.0", { "pollIntervalMs": 30000 }]]
+  "plugin": [["github:rabesss/anomalyfm-opencode#v0.2.1", { "pollIntervalMs": 30000 }]]
 }
 ```
 

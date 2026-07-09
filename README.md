@@ -27,32 +27,34 @@ Audio plays through `mpv`. Toggling playback off **truly pauses** — the `mpv` 
 
 ## Install
 
-The plugin isn't published to npm — install it from GitHub. `opencode plugin` clones it, reads the plugin manifest, installs the package into opencode's config dir, and adds the entry to `tui.json` for you. (At runtime opencode provides the host packages — `@opencode-ai/plugin`, `@opentui/solid`, `solid-js`.)
+Not published to npm — install a pinned release straight from GitHub. `opencode plugin` clones it, reads the plugin manifest, installs the package into opencode's config dir, and adds the entry to `tui.json` for you. (At runtime opencode provides the host packages — `@opencode-ai/plugin`, `@opentui/solid`, `solid-js`.)
 
 ```bash
-opencode plugin github:rabesss/anomalyfm-opencode
+# user-wide (global config):
+opencode plugin -g github:rabesss/anomalyfm-opencode#v0.2.0
+# per-project (.opencode/tui.json):
+opencode plugin    github:rabesss/anomalyfm-opencode#v0.2.0
 ```
 
-Add `-g` / `--global` to install it for every project.
+Pin to a tag so a checkout never tracks moving `master`. To move to a later release, change the tag and re-run.
 
 <details>
-<summary>Install from a local clone, or edit <code>tui.json</code> by hand</summary>
+<summary>Offline / no package machinery — local path in <code>tui.json</code></summary>
 
-From a clone:
+If you'd rather not use the installer, clone the release and point `tui.json` at the directory with an absolute path or `file://` URL (opencode does no `~` expansion):
 
 ```bash
-git clone https://github.com/rabesss/anomalyfm-opencode
-opencode plugin ./anomalyfm-opencode
+git clone --branch v0.2.0 https://github.com/rabesss/anomalyfm-opencode /home/you/src/anomalyfm-opencode
 ```
-
-Or register it directly in your opencode `tui.json` (create it in your config dir if absent). The entry is the package name once it's installed:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["anomalyfm-opencode"]
+  "plugin": ["file:///home/you/src/anomalyfm-opencode"]
 }
 ```
+
+Update by fetching tags and checking out a newer release (a tag checkout is a detached HEAD, so plain `git pull` won't move it): `git fetch --tags && git checkout v0.2.1`.
 
 </details>
 

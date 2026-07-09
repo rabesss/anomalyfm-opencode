@@ -1,6 +1,6 @@
 {
   "name": "anomalyfm-opencode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "anomaly.fm radio plugin for the opencode TUI — statusline + mpv audio.",
   "type": "module",
   "module": "src/index.tsx",

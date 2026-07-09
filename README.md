@@ -66,11 +66,11 @@ The plugin only adds a palette entry — it doesn't rebind or remove any of your
 
 ## Options
 
-Pass options as a `[spec, options]` tuple in `tui.json`:
+Pass options as a `[spec, options]` tuple in `tui.json` — the `spec` must match the entry `opencode plugin` recorded (for a GitHub install that's the full spec):
 
 ```jsonc
 {
-  "plugin": [["anomalyfm-opencode", { "pollIntervalMs": 30000 }]]
+  "plugin": [["github:rabesss/anomalyfm-opencode#v0.2.0", { "pollIntervalMs": 30000 }]]
 }
 ```
 

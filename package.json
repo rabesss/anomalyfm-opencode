@@ -9,6 +9,28 @@
     "./tui": "./src/index.tsx",
     "./types": "./src/types.ts"
   },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "opencode",
+    "anomalyfm",
+    "radio",
+    "music",
+    "tui",
+    "plugin",
+    "statusline",
+    "mpv"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rabesss/anomalyfm-opencode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rabesss/anomalyfm-opencode/issues"
+  },
+  "homepage": "https://github.com/rabesss/anomalyfm-opencode#readme",
   "scripts": {
     "test": "bun test ./test",
     "verify-pause": "bash scripts/verify-pause.sh"
@@ -18,10 +40,11 @@
     "@opencode-ai/sdk": "1.17.13",
     "@opentui/core": "0.4.3",
     "@opentui/keymap": "0.4.3",
-    "@opentui/solid": "0.4.3"
+    "@opentui/solid": "0.4.3",
+    "solid-js": "1.9.12"
   },
   "devDependencies": {
     "@types/bun": "latest"
   },
-  "engines": { "bun": ">=1.3.0" }
+  "engines": { "bun": ">=1.3.14" }
 }

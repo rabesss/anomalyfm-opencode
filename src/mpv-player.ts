@@ -33,19 +33,7 @@
  *    rely on it rather than rolling our own.
  */
 
-export type PlayerState =
-  | "PAUSED"
-  | "CONNECTING"
-  | "PLAYING"
-  | "ERROR"
-  | "UNSUPPORTED";
-
-export interface StreamPlayer {
-  play(): Promise<void>; // open the stream + start playback
-  pause(): void; // TEAR DOWN: kill process, free resources
-  readonly state: PlayerState;
-  readonly error?: string;
-}
+import type { PlayerState, StreamPlayer } from "./player.ts";
 
 /** Default stream — anomaly.fm live Icecast MP3 mount. */
 export const ANOMALY_STREAM_URL = "https://anomaly.fm/radio";
@@ -90,8 +78,8 @@ export const ANOMALY_STREAM_URL = "https://anomaly.fm/radio";
  *                         stdout/stderr stay empty and we detect playback by
  *                         liveness instead. See class docstring.
  *
- * NOTE: no `--` separator before the URL is needed here because mpv accepts the
- * URL as the final positional argument; we keep the array minimal.
+ * A `--` separator precedes the URL so a streamUrl that begins with `--` is
+ * treated as a positional argument, never an mpv option.
  */
 export const MPV_ARGS = (url: string): string[] => [
   "--no-video",
@@ -100,6 +88,7 @@ export const MPV_ARGS = (url: string): string[] => [
   "--network-timeout=3", // connect+read cap; < DEFAULT_PLAY_SETTLE_MS (4s) — false-PLAYING guard
   "--ytdl=no", // disables the on_load_fail yt-dlp retry that masks a connect failure
   "--no-terminal",
+  "--",
   url,
 ];
 

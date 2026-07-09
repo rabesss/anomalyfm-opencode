@@ -17,16 +17,37 @@ export const DEFAULTS = {
   statusUrl: "https://anomaly.fm/feed/status.json",
 };
 
+/** Floor on poll interval — anything tighter hammers the status endpoint. */
+export const MIN_POLL_INTERVAL_MS = 1_000;
+
 export function resolveOptions(raw: unknown): PluginOptions & typeof DEFAULTS {
   const opts = (raw && typeof raw === "object" ? raw : {}) as Partial<PluginOptions>;
   return {
     ...DEFAULTS,
-    pollIntervalMs: clampPositiveInt(opts.pollIntervalMs, DEFAULTS.pollIntervalMs),
-    streamUrl: typeof opts.streamUrl === "string" ? opts.streamUrl : DEFAULTS.streamUrl,
-    statusUrl: typeof opts.statusUrl === "string" ? opts.statusUrl : DEFAULTS.statusUrl,
+    pollIntervalMs: clampPollInterval(opts.pollIntervalMs, DEFAULTS.pollIntervalMs),
+    streamUrl: httpUrl(opts.streamUrl, DEFAULTS.streamUrl),
+    statusUrl: httpUrl(opts.statusUrl, DEFAULTS.statusUrl),
   };
 }
 
-function clampPositiveInt(v: unknown, dflt: number): number {
-  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : dflt;
+function clampPollInterval(v: unknown, dflt: number): number {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return dflt;
+  return Math.max(MIN_POLL_INTERVAL_MS, Math.floor(v));
+}
+
+/**
+ * Accept only http(s) URLs and fall back to the default otherwise — including a
+ * streamUrl that starts with "--", which mpv would otherwise read as a flag.
+ * Returns the parsed `href` (not the raw input): WHATWG URL parsing strips
+ * leading/trailing whitespace and embedded tab/newline/CR *for parsing only*,
+ * so returning the raw string would let those contaminants reach mpv.
+ */
+function httpUrl(v: unknown, dflt: string): string {
+  if (typeof v !== "string") return dflt;
+  try {
+    const u = new URL(v);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : dflt;
+  } catch {
+    return dflt;
+  }
 }

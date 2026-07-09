@@ -128,12 +128,12 @@ const plugin: TuiPluginModule = {
           const snap = getSnapshot()?.status ?? null;
           const state = getControllerState();
           // Left-indent the statusline so it aligns with opencode's chat input
-          // box content (the rounded-border padding), not the terminal's col 0.
-          // Measured: the input box's "Ask anything..." text starts at col 7;
-          // our raw line renders at col 1, so a 6-space indent lands us under
-          // it. The indent is subtracted from renderLine's width budget so the
-          // truncation invariant (preserve bullet + trailing glyph) still holds
-          // and the line never overflows on a narrow terminal.
+          // box BORDER (the ┃/╹ at col 4), not the terminal's col 0 — the
+          // border is the panel's true left edge, so the statusline reads as
+          // part of the same panel system. INDENT_COLS = 3 lands the ◆ at col
+          // 4. It is subtracted from renderLine's width budget so the display-
+          // width truncation (preserve bullet + trailing glyph) still holds and
+          // the line never overflows on a narrow terminal.
           const line = renderLine(snap, state, width() - INDENT_COLS);
           const cur = api.theme.current;
           const resolve = (tok: StatusToken) => cur[tok];
@@ -178,13 +178,12 @@ const plugin: TuiPluginModule = {
 
     // --- teardown ---
     // The slot registration auto-disposes with the plugin; the keymap layer and
-    // the poller/controller we own and must stop ourselves. CORRECTION #1 vs.
-    // the brief: the real StatusPoller API is start()/stop() — there is no
-    // dispose() (src/poller.ts:90,101).
+    // the poller/controller we own and must stop ourselves. The StatusPoller API
+    // is start()/stop() — there is no dispose().
     api.lifecycle.onDispose(() => {
       disposeKeymap();
-      controller.dispose(); // stops the player, cancels retry + watchdog
-      poller.stop(); // clears the interval; in-flight fetch is left to settle
+      controller.dispose(); // stops the player, cancels the pending retry
+      poller.stop(); // cancels the cadence timer; in-flight fetch settles
     });
   },
 };

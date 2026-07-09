@@ -59,6 +59,45 @@ test("narrow width truncates the line, never breaks the glyph", () => {
   expect(line).toMatch(/[▶⏸⚠]$/); // glyph preserved at the tail
 });
 
+// Width here is terminal COLUMNS, not JS length. A CJK host name occupies 2
+// cells per ideograph; an emoji host name occupies 2 cells per pictograph.
+function displayWidth(str: string): number {
+  let w = 0;
+  for (const ch of str) {
+    const cp = ch.codePointAt(0)!;
+    if (cp >= 0x1100 && cp <= 0x115f) { w += 2; continue; }
+    if (cp >= 0x2e80 && cp <= 0xa4cf) { w += 2; continue; }
+    if (cp >= 0xac00 && cp <= 0xd7a3) { w += 2; continue; }
+    if (cp >= 0xf900 && cp <= 0xfaff) { w += 2; continue; }
+    if (cp >= 0xfe30 && cp <= 0xfe4f) { w += 2; continue; }
+    if (cp >= 0xff00 && cp <= 0xff60) { w += 2; continue; }
+    if (cp >= 0xffe0 && cp <= 0xffe6) { w += 2; continue; }
+    if (cp >= 0x1f000 && cp <= 0x1faff) { w += 2; continue; }
+    if (cp >= 0x20000 && cp <= 0x3fffd) { w += 2; continue; }
+    if (cp >= 0x0300 && cp <= 0x036f) continue;
+    if (cp >= 0x200b && cp <= 0x200f) continue;
+    w += 1;
+  }
+  return w;
+}
+
+test("CJK host name truncates by display width, never breaks the glyph", () => {
+  const s = { ...base, humans: 1, members: ["田中太郎"] }; // 4 ideographs = 8 cells
+  const line = renderLine(s, "PLAYING", 40);
+  expect(displayWidth(line)).toBeLessThanOrEqual(40);
+  expect(line).toMatch(/[▶⏸⚠]$/);
+  expect(line.startsWith("◆")).toBe(true);
+});
+
+test("emoji host name truncates by display width, no split surrogate", () => {
+  const s = { ...base, humans: 1, members: ["🎵🎧radio"] };
+  const line = renderLine(s, "PLAYING", 36);
+  expect(displayWidth(line)).toBeLessThanOrEqual(36);
+  expect(line).toMatch(/[▶⏸⚠]$/);
+  // No lone half of a surrogate pair (a split would produce U+FFFD on encode).
+  expect(Buffer.from(line, "utf8").toString("utf8")).toBe(line);
+});
+
 // --- bulletToken: accent only when a human is actually on air -----------------
 test("bulletToken: ON AIR (humans present) → accent", () => {
   expect(bulletToken({ ...base, humans: 1, members: ["ryan"] })).toBe("accent");

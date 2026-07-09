@@ -137,6 +137,10 @@ test("MPV_ARGS carries the false-PLAYING connect-cap + ytdl flags", () => {
   const args = MPV_ARGS("https://anomaly.fm/radio");
   expect(args).toContain("--network-timeout=3");
   expect(args).toContain("--ytdl=no");
+  // The URL is a positional arg preceded by `--` so a streamUrl starting with
+  // "--" is never read as an mpv option. Pin both the separator and position.
+  expect(args.at(-2)).toBe("--");
+  expect(args.at(-1)).toBe("https://anomaly.fm/radio");
   // The invariant that makes the cap work: network-timeout value < settle window.
   const cap = args
     .find((a) => a.startsWith("--network-timeout="))

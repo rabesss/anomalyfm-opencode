@@ -15,7 +15,7 @@
  *
  *   Window C (paused-after-playing) MUST show:
  *     (a) no mpv process   — the mpv child must have been SIGKILL'd.
- *     (b) zero TCP bytes/sec to anomaly.fm (161.210.92.14).
+ *     (b) zero TCP bytes/sec to anomaly.fm (IP resolved at startup).
  *     (c) host opencode process RSS/CPU within noise of Window A's baseline.
  *
  *   Concrete "within noise" thresholds:
@@ -44,8 +44,25 @@
 
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { lookup } from "node:dns/promises";
 
-const ANOMALY_IP = "161.210.92.14";
+const ANOMALY_HOST = "anomaly.fm";
+/** anomaly.fm IPs — resolved from DNS at startup (override via ANOMALY_IP env). */
+let ANOMALY_IPS: string[] = [];
+
+/** Resolve anomaly.fm's addresses; honor an ANOMALY_IP override (comma-sep). */
+async function resolveAnomalyIps(): Promise<string[]> {
+  const override = process.env.ANOMALY_IP;
+  if (override) return override.split(",").map((s) => s.trim()).filter(Boolean);
+  try {
+    const res = await lookup(ANOMALY_HOST, { all: true, family: 4 });
+    const ips = res.map((r) => r.address).filter(Boolean);
+    if (ips.length) return ips;
+  } catch {
+    // DNS failed — caller decides whether to abort (empty list => no socket match).
+  }
+  return [];
+}
 // SANITY=1 (e.g. `SANITY=1 bash scripts/verify-pause.sh $$`) skips the
 // operator Enter-prompts between windows AND defaults to short windows so the
 // script can be smoke-run against any pid without a real opencode plugin.
@@ -211,13 +228,13 @@ function readProc(
 
 /**
  * Sum bytes_received across sockets owned by the mpv child (pid) whose peer is
- * ANOMALY_IP. Ported verbatim from measure.ts: `ss -tnp` → ports of
- * mpv→anomaly.fm (filtered by `pid=${pid},`), then `ss -tni` → sum.
+ * an anomaly.fm IP (ANOMALY_IPS). Ported verbatim from measure.ts: `ss -tnp`
+ * → ports of mpv→anomaly.fm (filtered by `pid=${pid},`), then `ss -tni` → sum.
  *
  * The pid filter is essential here: the opencode host process ALSO polls
  * status JSON over HTTPS at https://anomaly.fm/radio/status.json, and that
- * domain resolves to the SAME IP (161.210.92.14) as the streaming socket —
- * `dig anomaly.fm` returns 161.210.92.14 directly. An IP-only filter would
+ * domain resolves to the SAME IP(s) as the streaming socket (resolved at
+ * startup; override via ANOMALY_IP). An IP-only filter would
  * therefore count the host's own status-poll bytes, which the prototype
  * deliberately excluded. Scoping to the mpv child's pid measures ONLY the
  * streaming socket.
@@ -228,7 +245,7 @@ function readProc(
  */
 function readSocketBytesToAnomaly(pid: number | null): number {
   if (!pid) return -1;
-  // 1. local ports OWNED BY THIS mpv pid that connect to ANOMALY_IP.
+  // 1. local ports OWNED BY THIS mpv pid that connect to an anomaly.fm IP.
   let out = "";
   try {
     const r = spawnSync("ss", ["-tnp"], { encoding: "utf8" });
@@ -239,7 +256,7 @@ function readSocketBytesToAnomaly(pid: number | null): number {
   const ports = new Set<string>();
   for (const line of out.split("\n")) {
     if (!line.includes(`pid=${pid},`)) continue;
-    if (!line.includes(ANOMALY_IP)) continue;
+    if (!ANOMALY_IPS.some((ip) => line.includes(ip))) continue;
     const m = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)/);
     if (m) ports.add(m[2]);
   }
@@ -524,7 +541,18 @@ async function main() {
   }
   log(`verify-pause: host opencode pid = ${hostPid}`);
   log(`  WINDOW_SEC=${WINDOW_SEC} SAMPLE_HZ=${SAMPLE_HZ}`);
-  log(`  ANOMALY_IP=${ANOMALY_IP}`);
+  ANOMALY_IPS = await resolveAnomalyIps();
+  log(`  anomaly.fm → ${ANOMALY_IPS.join(", ") || "(unresolved)"}`);
+  // An empty IP list would make readSocketBytesToAnomaly() return -1 (no socket
+  // found) → 0 B/s → a FALSE PASS on the streaming-socket check. Abort unless
+  // SANITY mode is smoke-running without a real plugin/socket.
+  if (ANOMALY_IPS.length === 0 && !SANITY) {
+    console.error(
+      "verify-pause: could not resolve anomaly.fm and ANOMALY_IP is not set.\n" +
+        "  Run `dig anomaly.fm +short`, then re-run with ANOMALY_IP=<ip>.",
+    );
+    process.exit(2);
+  }
 
   // Confirm the host is alive before we burn 3 windows.
   const probe = readProc(hostPid);

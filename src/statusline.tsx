@@ -24,15 +24,18 @@ import type { ControllerState } from "./controller.ts";
 export type StatusToken = "accent" | "warning" | "textMuted";
 
 /**
- * Trailing glyph per controller state. CONNECTING shares PAUSED's ⏸. INVARIANT:
+ * Trailing glyph per controller state. CONNECTING renders ▶ (optimistic): the
+ * controller emits CONNECTING synchronously on tune-in, so the glyph flips
+ * ⏸→▶ instantly while mpv's ~4s liveness settle confirms backend PLAYING in the
+ * background. A genuine connect failure reverts ▶→⚠ once mpv exits. INVARIANT:
  * every value MUST be a BMP character (a single UTF-16 code unit) — truncate()
  * slices the trailing " "+glyph by code unit (slice(-2)) and index.tsx indexes
- * line[line.length-1], both of which would split a supplementary/astral glyph.
+ * line[line.length-1], both of which split a supplementary/astral glyph.
  * Adding an emoji here requires making the whole render path code-point-aware.
  */
 export const GLYPH: Record<ControllerState, string> = {
   PAUSED: "⏸",
-  CONNECTING: "⏸",
+  CONNECTING: "▶",
   PLAYING: "▶",
   ERROR: "⚠",
   UNSUPPORTED: "⚠",

@@ -21,6 +21,16 @@ test("ON AIR with no member name falls back to count", () => {
     .toBe("◆ anomaly.fm · ON AIR · 2 in booth · 12 live · ⏸");
 });
 
+test("CONNECTING renders the optimistic ▶ glyph (instant ⏸→▶ on tune-in)", () => {
+  // The controller emits CONNECTING synchronously on start(); mapping
+  // CONNECTING→▶ flips the glyph instantly while mpv's ~4s settle confirms
+  // backend PLAYING. A connect failure later reverts ▶→⚠ via ERROR.
+  expect(GLYPH.CONNECTING).toBe("▶");
+  const s = { ...base, humans: 1, members: ["ryan"] };
+  expect(renderLine(s, "CONNECTING", 80))
+    .toBe("◆ anomaly.fm · ON AIR · ryan · 12 live · ▶");
+});
+
 test("RERUN shows rerun label", () => {
   const s = { ...base, humans: 0, rerun: "Jul 2 | 6:54 PM | David, vogel" };
   expect(renderLine(s, "PLAYING", 80))

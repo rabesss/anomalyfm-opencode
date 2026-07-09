@@ -154,8 +154,7 @@ const plugin: TuiPluginModule = {
         {
           name: "radio.toggle",
           namespace: "palette",
-          title: "anomaly.fm: toggle playback",
-          desc: "Tune in to / pause anomaly.fm",
+          title: "Play / pause",
           category: "anomaly.fm",
           run: () => {
             void controller.toggle();

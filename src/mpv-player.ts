@@ -18,8 +18,10 @@
  *   `--no-terminal` makes mpv emit ZERO bytes while audio still plays
  *   (measured: 0 lines / 6s). That eliminates the drain work entirely; the
  *   cost of playing collapses to mpv's own ~1% decode + our near-idle poller.
- *   We pay for it with a ~4s "CONNECTING" settle window before the glyph flips
- *   to PLAYING, which is the right trade for a 35x CPU reduction.
+ *   The ~4s settle still gates backend PLAYING (liveness confirmation), but the
+ *   glyph no longer waits for it — the statusline renders CONNECTING as ▶, so
+ *   the flip is instant while the settle confirms in the background. Pure win:
+ *   the 35x CPU reduction costs zero perceived latency.
  *
  *   We also tried `--input-ipc-server` (JSON unix socket) earlier — under
  *   Bun.spawn, mpv connects and runs but never creates the socket file in this
